@@ -1,0 +1,42 @@
+name: One-shot upstream Ruff fix
+
+on:
+  push:
+    branches:
+      - upgrade/tuya-ble-0.12.1-locks
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          ref: upgrade/tuya-ble-0.12.1-locks
+
+      - name: Fix missing Any import and commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("custom_components/tuya_ble/cover.py")
+          text = path.read_text(encoding="utf-8")
+          old = "from enum import IntEnum\nimport logging\n"
+          new = "from enum import IntEnum\nimport logging\nfrom typing import Any\n"
+          if text.count(old) != 1:
+              raise RuntimeError("Unexpected cover.py import layout")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          rm -f .github/workflows/fix-cover-any.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --check
+          git commit -m "Fix missing Any import in upstream cover platform"
+          git push origin HEAD:upgrade/tuya-ble-0.12.1-locks
