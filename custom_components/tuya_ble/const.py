@@ -17,6 +17,13 @@ SET_DISCONNECTED_DELAY = 10 * 60
 
 CONF_UUID: Final = "uuid"
 CONF_LOCAL_KEY: Final = "local_key"
+CONF_SEC_KEY: Final = "sec_key"
+
+# Connection policy (entry options)
+CONF_KEEP_CONNECTION: Final = "keep_connection"
+CONF_IDLE_DISCONNECT_DELAY: Final = "idle_disconnect_delay"
+DEFAULT_KEEP_CONNECTION: Final = True
+DEFAULT_IDLE_DISCONNECT_DELAY: Final = 30
 CONF_CATEGORY: Final = "category"
 CONF_PRODUCT_ID: Final = "product_id"
 CONF_DEVICE_NAME: Final = "device_name"
@@ -31,6 +38,7 @@ CONF_ENDPOINT: Final = "endpoint"
 CONF_ACCESS_ID: Final = "access_id"
 CONF_ACCESS_SECRET: Final = "access_secret"
 CONF_APP_TYPE: Final = "tuya_app_type"
+CONF_MOBILE_APP: Final = "mobile_app"
 TUYA_RESPONSE_CODE: Final = "code"
 TUYA_RESPONSE_RESULT: Final = "result"
 TUYA_RESPONSE_MSG: Final = "msg"
@@ -70,6 +78,106 @@ FINGERBOT_MODE_PUSH: Final = "push"
 FINGERBOT_MODE_SWITCH: Final = "switch"
 FINGERBOT_MODE_PROGRAM: Final = "program"
 FINGERBOT_BUTTON_EVENT: Final = "fingerbot_button_pressed"
+
+# Enum ranges of the Parkside robot mower, in the order declared by the device
+# model. Enum DPs carry the index of the active value.
+#
+# The values are copied verbatim from the device model. Misspellings such as
+# UPDATA, LIFTE, UNEXCEPECT_LOW, FIXED_MOWING_INTERUPT, CHARGR_CURRENT_LOW and
+# TIMESET_UNLEGAL are the manufacturer's own and must not be corrected:
+# lowercased, they are the states these entities report and the keys their
+# translations are looked up by.
+PARKSIDE_MOWER_STATUSES: Final = [
+    "STANDBY",
+    "CHARGING",
+    "MOWING",
+    "PAUSED",
+    "PARK",
+    "UPDATA",
+    "FIXED_MOWING",
+    "ERROR",
+    "SELF_TEST",
+    "CHARGING_WITH_TASK_SUSPEND",
+    "EMERGENCY",
+    "LOCKED",
+    "EDGE",
+]
+
+PARKSIDE_MOWER_COMMANDS: Final = [
+    "PauseWork",
+    "CancelWork",
+    "ContinueWork",
+    "StartMowing",
+    "StartFixedMowing",
+    "StartReturnStation",
+    "EDGE",
+]
+
+# Bit labels of the machine error bitmap, used to name the entries of the
+# error logs.
+PARKSIDE_MOWER_ERRORS: Final = [
+    "FAULT_LEAN",
+    "FAULT_TOO_STEEP",
+    "NO_SIGNAL",
+    "L_MOTOR_ERROR",
+    "R_MOTOR_ERROR",
+    "BATTERY_VOL_HIG",
+    "B_TEMP_ERROR",
+    "DISCHAR_ERROR",
+    "CHARGE_OVERTEMP",
+    "BATTERY_DAMAGE",
+    "BATTERY_LOWDIS",
+    "CHARGE_CURDIS",
+    "CHARGE_TEMP",
+    "UNEXCEPECT_LOW",
+    "B_ERROR_RESET",
+    "IMU_INVALID",
+    "EMS_INVALID",
+    "L_MOTOR_HALL",
+    "R_MOTOR_HALL",
+    "STEEP_OVER_3S",
+    "OUTSIDE_AREA",
+    "LIFTE",
+    "DTRAPPED",
+    "B_MOTOR_ERROR",
+    "OVERTURN",
+    "MOTOR_OVERCUR",
+    "MOTOR_HALL",
+    "MOTOR_DISCON",
+    "EMS_DISCONNECT",
+    "MOTOR_ERROR",
+]
+
+PARKSIDE_MOWER_WARNINGS: Final = [
+    "MOWER_LEAN",
+    "MOWER_STEEP",
+    "RAIN_PARK",
+    "BATTERY_NOT_ENOUGH",
+    "NO_LOOP_SIGNAL",
+    "CLOSE_TOPCOVER",
+    "MOWER_IN_STATION",
+    "MOWER_OUT_STATION",
+    "PLACE_INSIDE",
+    "FIXED_END",
+    "CHARGING_DISCONNECT",
+    "CHARGING_PAUSE",
+    "WORK_INTERRUPT",
+    "FIXED_MOWING_INTERUPT",
+    "TURN_ON_BUTTON",
+    "PRESS_START_KEY",
+    "TIMESET_30MIN",
+    "TIMESET_UNLEGAL",
+    "CHARGR_CURRENT_LOW",
+    "RAIN_OUT_STATION",
+    "UPDATA_FAIL",
+    "CONTINUE_TOOLTIP",
+    "MOWER_EMERGENCY",
+    "MOWER_UI_LOCKED",
+    "DISCHARGE_ERROR",
+    "CHARGE_TEMP_ERROR",
+    "HEDGEHOG",
+    "NTC",
+]
 
 
 class WorkMode(StrEnum):
@@ -359,6 +467,7 @@ class DPCode(StrEnum):
     ALARM_TIME = "alarm_time"  # Alarm time
     ALARM_VOLUME = "alarm_volume"  # Alarm volume
     ALARM_MESSAGE = "alarm_message"
+    ALARM_LOCK = "alarm_lock"
     ANGLE_HORIZONTAL = "angle_horizontal"
     ANGLE_VERTICAL = "angle_vertical"
     ANION = "anion"  # Ionizer unit
@@ -426,12 +535,15 @@ class DPCode(StrEnum):
     CUR_CURRENT = "cur_current"  # Actual current
     CUR_POWER = "cur_power"  # Actual power
     CUR_VOLTAGE = "cur_voltage"  # Actual voltage
+    DAY_USAGE_AFTER_RESET = "day_usage_after_reset"
+    DAY_WATER_USAGE = "day_water_usage"
     DECIBEL_SENSITIVITY = "decibel_sensitivity"
     DECIBEL_SWITCH = "decibel_switch"
     DEHUMIDITY_SET_ENUM = "dehumidify_set_enum"
     DEHUMIDITY_SET_VALUE = "dehumidify_set_value"
     DISINFECTION = "disinfection"
     DO_NOT_DISTURB = "do_not_disturb"
+    DOORBELL = "doorbell"
     DOORCONTACT_STATE = "doorcontact_state"  # Status of door window sensor
     DOORCONTACT_STATE_2 = "doorcontact_state_2"
     DOORCONTACT_STATE_3 = "doorcontact_state_3"
@@ -458,6 +570,7 @@ class DPCode(StrEnum):
     FILTER_RESET = "filter_reset"  # Filter (cartridge) reset
     FLOODLIGHT_LIGHTNESS = "floodlight_lightness"
     FLOODLIGHT_SWITCH = "floodlight_switch"
+    FLOW_VELOCITY = "flow_velocity"
     FORWARD_ENERGY_TOTAL = "forward_energy_total"
     GAS_SENSOR_STATE = "gas_sensor_state"
     GAS_SENSOR_STATUS = "gas_sensor_status"
@@ -477,8 +590,10 @@ class DPCode(StrEnum):
     LIGHT = "light"  # Light
     LIGHT_MODE = "light_mode"
     LOCK = "lock"  # Lock / Child lock
+    LOCK_MOTOR_STATE = "lock_motor_state"
     MASTER_MODE = "master_mode"  # alarm mode
     MACH_OPERATE = "mach_operate"
+    MANUAL_LOCK = "manual_lock"
     MANUAL_FEED = "manual_feed"
     MATERIAL = "material"  # Material
     MODE = "mode"  # Working mode / Mode
@@ -519,6 +634,7 @@ class DPCode(StrEnum):
     RECORD_MODE = "record_mode"
     RECORD_SWITCH = "record_switch"  # Recording switch
     RELAY_STATUS = "relay_status"
+    RESIDUAL_ELECTRICITY = "residual_electricity"
     REMAIN_TIME = "remain_time"
     RESET_DUSTER_CLOTH = "reset_duster_cloth"
     RESET_EDGE_BRUSH = "reset_edge_brush"
@@ -599,8 +715,10 @@ class DPCode(StrEnum):
     TOTAL_CLEAN_TIME = "total_clean_time"
     TOTAL_FORWARD_ENERGY = "total_forward_energy"
     TOTAL_TIME = "total_time"
+    TOTAL_USAGE_AFTER_RESET = "total_usage_after_reset"
     TOTAL_PM = "total_pm"
     TVOC = "tvoc"
+    UNLOCK_BLE = "unlock_ble"
     UPPER_TEMP = "upper_temp"
     UPPER_TEMP_F = "upper_temp_f"
     UV = "uv"  # UV sterilization
@@ -612,11 +730,14 @@ class DPCode(StrEnum):
     VOICE_SWITCH = "voice_switch"
     VOICE_TIMES = "voice_times"
     VOLUME_SET = "volume_set"
+    VOLTAGE_CURRENT = "voltage_current"
     WARM = "warm"  # Heat preservation
     WARM_TIME = "warm_time"  # Heat preservation time
     WATER = "water"
+    WATER_ONCE = "water_once"
     WATER_RESET = "water_reset"  # Resetting of water usage days
     WATER_SET = "water_set"  # Water level
+    WATER_USE_DATA = "water_use_data"
     WATERSENSOR_STATE = "watersensor_state"
     WEATHER_DELAY = "weather_delay"
     WET = "wet"  # Humidification
@@ -627,3 +748,6 @@ class DPCode(StrEnum):
     WIRELESS_ELECTRICITY = "wireless_electricity"
     WORK_MODE = "work_mode"  # Working mode
     WORK_POWER = "work_power"
+    DIRECTION_CONTROL = "direction_control"  # Window cleaner direction
+    SWITCH_GO = "switch_go"  # Window cleaner clean switch
+    WATER_AUTO = "water_auto"  # Window cleaner auto spray water

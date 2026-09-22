@@ -18,7 +18,7 @@ from homeassistant.components.climate.const import (
     PRESET_NONE,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTemperature
+from homeassistant.const import UnitOfTemperature, Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
@@ -105,7 +105,7 @@ mapping: dict[str, TuyaBLECategoryClimateMapping] = {
                     # - [ ] 121 - Historical data (Month-motor opening degree)
                     # - [ ] 122 - Historical data (Year-motor opening degree)
                     # - [ ] 123 - Programming data (Monday)
-                    # - [ ] 124 - Programming data (Tuseday)
+                    # - [ ] 124 - Programming data (Tuesday)
                     # - [ ] 125 - Programming data (Wednesday)
                     # - [ ] 126 - Programming data (Thursday)
                     # - [ ] 127 - Programming data (Friday)
@@ -132,6 +132,34 @@ mapping: dict[str, TuyaBLECategoryClimateMapping] = {
             ),
         },
     ),
+    "wkf": TuyaBLECategoryClimateMapping(
+        products={
+            **dict.fromkeys(
+                [
+                    "llflaywg",
+                ],  # Thermostatic Radiator Valve
+                [
+                    # Thermostatic Radiator Valve
+                    TuyaBLEClimateMapping(
+                        description=ClimateEntityDescription(
+                            key="thermostatic_radiator_valve",
+                        ),
+                        hvac_switch_dp_id=101,
+                        hvac_switch_mode=HVACMode.HEAT,
+                        hvac_modes=[HVACMode.OFF, HVACMode.HEAT],
+                        preset_mode_dp_ids={PRESET_AWAY: 106, PRESET_NONE: 106},
+                        current_temperature_dp_id=102,
+                        current_temperature_coefficient=10.0,
+                        target_temperature_coefficient=10.0,
+                        target_temperature_step=0.5,
+                        target_temperature_dp_id=103,
+                        target_temperature_min=5.0,
+                        target_temperature_max=30.0,
+                    ),
+                ],
+            ),
+        },
+    ),
 }
 
 
@@ -149,6 +177,8 @@ def get_mapping_by_device(device: TuyaBLEDevice) -> list[TuyaBLECategoryClimateM
 
 class TuyaBLEClimate(TuyaBLEEntity, ClimateEntity):
     """Representation of a Tuya BLE Climate."""
+
+    platform = Platform.CLIMATE
 
     def __init__(
         self,

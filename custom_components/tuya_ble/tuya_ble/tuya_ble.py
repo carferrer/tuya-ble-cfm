@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import hashlib
 import logging
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from struct import pack, unpack
 from dataclasses import dataclass
 from typing import Any
@@ -25,25 +26,33 @@ from bleak_retry_connector import (
 )
 from Crypto.Cipher import AES
 
-from homeassistant.components.tuya.const import (
-    DPCode,
-)
-
-from tuya_device_handlers.const import (
-    DPType,
-)
-
 from .const import (
     CHARACTERISTIC_NOTIFY,
+    CHARACTERISTIC_NOTIFY_FD50,
     CHARACTERISTIC_WRITE,
+    CONNECT_ATTEMPTS,
     GATT_MTU,
     MANUFACTURER_DATA_ID,
+    NOTIFY_ATTEMPTS,
+    NOTIFY_RETRY_DELAY,
+    POST_CONNECT_DELAY,
+    DEFAULT_IDLE_DISCONNECT_DELAY,
+    RECONNECT_BACKOFF_MAX,
+    RECONNECT_BACKOFF_MIN,
     RESPONSE_WAIT_TIMEOUT,
-    SERVICE_UUID,
+    SERVICE_CHARACTERISTICS,
+    SERVICE_UUID_TEMP,
+    SERVICE_UUIDS,
     TuyaBLECode,
     TuyaBLEDataPointType,
 )
+
+from ..const import (
+    DPType,
+)
+
 from .exceptions import (
+    TuyaBLEError,
     TuyaBLEDataCRCError,
     TuyaBLEDataFormatError,
     TuyaBLEDataLengthError,
@@ -51,18 +60,30 @@ from .exceptions import (
     TuyaBLEEnumValueError,
 )
 from .manager import AbstaractTuyaBLEDeviceManager, TuyaBLEDeviceCredentials
+from .security import TuyaBLESecurityMaterial
 
 _LOGGER = logging.getLogger(__name__)
 
 
 BLEAK_EXCEPTIONS = (*BLEAK_RETRY_EXCEPTIONS, OSError)
 
-@dataclass
+
+FD50_DEVICE_INFO_PRODUCT_IDS = frozenset(
+    {"jntxv3q4", "9hdajpiw", "2hmqh0ty", "qcrilcpr"}
+)
+
+# Devices that need the FD50 device-info payload quirk above, but must
+# still use v1 (legacy) key derivation even when the cloud API returns a
+# sec_key. The FD50 payload format and v2 key derivation are independent
+# device properties that happen to coincide for every other known device.
+LEGACY_KEY_DERIVATION_PRODUCT_IDS = frozenset({"qcrilcpr"})
+
+
+# @dataclass
 class TuyaBLEEntityDescription:
-    key: str
     # Added to info that we get from the cloud
-    function: list[dict[str, dict]]  | None = None
-    status_range: list[dict[str, dict]]  | None = None
+    function: list[dict[str, dict]] | None = None
+    status_range: list[dict[str, dict]] | None = None
 
     # Replace the values that we got from the cloud
     values_overrides: dict[str, dict] | None = None
@@ -86,6 +107,9 @@ class TuyaBLEDataPoint:
         self._value = value
         self._changed_by_device = False
         self._update_from_device(timestamp, flags, type, value)
+
+    def __repr__(self) -> str:
+        return f"<TuyaBLEDataPoint id={self.id} timestamp={self.timestamp} type={self.type} flags={self.flags} value={self.value}>"
 
     def _update_from_device(
         self,
@@ -111,10 +135,10 @@ class TuyaBLEDataPoint:
             case TuyaBLEDataPointType.DT_ENUM:
                 if self._value > 0xFFFF:
                     return pack(">I", self._value)
-                elif self._value > 0xFF:
+                if self._value > 0xFF:
                     return pack(">H", self._value)
-                else:
-                    return pack(">B", self._value)
+
+                return pack(">B", self._value)
             case TuyaBLEDataPointType.DT_STRING:
                 return self._value.encode()
 
@@ -142,9 +166,6 @@ class TuyaBLEDataPoint:
     def changed_by_device(self) -> bool:
         return self._changed_by_device
 
-    def __repr__(self): 
-        return f"{{id:{self.id} type:{self.type} value:{self.value}}}"
-
     def __str__(self):
         return f"{self}"
 
@@ -171,17 +192,28 @@ class TuyaBLEDataPoint:
 
 
 class TuyaBLEDataPoints:
+    """Models DPs"""
+
     def __init__(self, owner: TuyaBLEDevice) -> None:
         self._owner = owner
         self._datapoints: dict[int, TuyaBLEDataPoint] = {}
         self._update_started: int = 0
         self._updated_datapoints: list[int] = []
+        self._last_data_received: datetime | None = None
 
     def __len__(self) -> int:
         return len(self._datapoints)
 
     def __getitem__(self, key: int) -> TuyaBLEDataPoint | None:
         return self._datapoints.get(key)
+
+    def __dict__(self) -> dict:
+        return self._datapoints
+
+    @property
+    def last_data_received(self) -> datetime | None:
+        """Last data received"""
+        return self._last_data_received
 
     def has_id(self, id: int, type: TuyaBLEDataPointType | None = None) -> bool:
         return (id in self._datapoints) and (
@@ -194,6 +226,7 @@ class TuyaBLEDataPoints:
         type: TuyaBLEDataPointType,
         value: bytes | bool | int | str | None = None,
     ) -> TuyaBLEDataPoint:
+        """Lazy loaded datapoint"""
         datapoint = self._datapoints.get(id)
         if datapoint:
             return datapoint
@@ -219,6 +252,7 @@ class TuyaBLEDataPoints:
         type: TuyaBLEDataPointType,
         value: bytes | bool | int | str,
     ) -> None:
+        self._last_data_received = datetime.now(timezone.utc)
         dp = self._datapoints.get(dp_id)
         if dp:
             dp._update_from_device(timestamp, flags, type, value)
@@ -238,26 +272,34 @@ class TuyaBLEDataPoints:
 
 global_connect_lock = asyncio.Lock()
 
+
 @dataclass
 class TuyaBLEDeviceFunction:
+    """Models a code, DP and values"""
+
     code: str
-    dp_id: int 
+    dp_id: int
     type: DPType
     values: str | dict | list | None
 
-    def __setattr__(self, name:str, value:str | dict | list | None):
+    def __setattr__(self, name: str, value: str | dict | list | None):
         if name == "values":
             # string values are JSON representations of the actual values
             if isinstance(value, str) and (v := json.loads(value)):
                 value = v
         super().__setattr__(name, value)
 
+
 class TuyaBLEDevice:
+    """Abstract model of a device"""
+
     def __init__(
         self,
         device_manager: AbstaractTuyaBLEDeviceManager,
         ble_device: BLEDevice,
         advertisement_data: AdvertisementData | None = None,
+        keep_connection: bool = True,
+        idle_disconnect_delay: int = DEFAULT_IDLE_DISCONNECT_DELAY,
     ) -> None:
         """Init the TuyaBLE."""
         self._device_manager = device_manager
@@ -267,11 +309,12 @@ class TuyaBLEDevice:
         self._operation_lock = asyncio.Lock()
         self._connect_lock = asyncio.Lock()
         self._client: BleakClientWithServiceCache | None = None
+        self._characteristic_notify = CHARACTERISTIC_NOTIFY
+        self._characteristic_write = CHARACTERISTIC_WRITE
         self._expected_disconnect = False
         self._connected_callbacks: list[Callable[[], None]] = []
         self._callbacks: list[Callable[[list[TuyaBLEDataPoint]], None]] = []
         self._disconnected_callbacks: list[Callable[[], None]] = []
-        self._connection_status_callbacks: list[Callable[[], None]] = []
         self._current_seq_num = 1
         self._seq_num_lock = asyncio.Lock()
 
@@ -289,21 +332,32 @@ class TuyaBLEDevice:
         self._local_key: bytes | None = None
         self._login_key: bytes | None = None
         self._session_key: bytes | None = None
+        self._security_material: TuyaBLESecurityMaterial | None = None
 
         self._is_paired = False
+        self._stopped = False
+        self._reconnect_backoff = RECONNECT_BACKOFF_MIN
+        self._reconnect_task: asyncio.Task | None = None
+        self._last_connect_error: str | None = None
+        self._last_connected_at: float | None = None
+
+        # Connection policy: hold the link open, or connect on demand and
+        # drop it again after idle_disconnect_delay seconds of inactivity.
+        self._keep_connection = keep_connection
+        self._idle_disconnect_delay = idle_disconnect_delay
+        self._idle_task: asyncio.Task | None = None
+        self._idle_disconnecting = False
 
         self._input_buffer: bytearray | None = None
         self._input_expected_packet_num = 0
         self._input_expected_length = 0
-        self._input_expected_responses: dict[int,
-                                             asyncio.Future[int] | None] = {}
+        self._input_expected_responses: dict[int, asyncio.Future[int] | None] = {}
         # self._input_future: asyncio.Future[int] | None = None
 
         self._datapoints = TuyaBLEDataPoints(self)
 
         self._function = {}
         self._status_range = {}
-
 
     def set_ble_device_and_advertisement_data(
         self, ble_device: BLEDevice, advertisement_data: AdvertisementData
@@ -316,7 +370,14 @@ class TuyaBLEDevice:
         _LOGGER.debug("%s: Initializing", self.address)
         if await self._update_device_info():
             self._decode_advertisement_data()
-            
+
+    def _requires_fd50_device_info_handshake(self) -> bool:
+        """Return whether this device needs the TuyaOS FD50 login framing."""
+        return (
+            self._characteristic_notify == CHARACTERISTIC_NOTIFY_FD50
+            and self.product_id in FD50_DEVICE_INFO_PRODUCT_IDS
+        )
+
     def _build_pairing_request(self) -> bytes:
         result = bytearray()
 
@@ -338,15 +399,6 @@ class TuyaBLEDevice:
             TuyaBLECode.FUN_SENDER_PAIR, self._build_pairing_request()
         )
 
-    async def reconnect(self) -> None:
-        _LOGGER.debug("%s: Reconnecting", self.address)
-        await self._ensure_connected()
-
-    async def reconnect_and_update(self) -> None:
-        _LOGGER.debug("%s: Reconnecting and updating", self.address)
-        await self._ensure_connected()
-        await self.update()
-
     async def update(self) -> None:
         _LOGGER.debug("%s: Updating", self.address)
         await self._send_packet(TuyaBLECode.FUN_SENDER_DEVICE_STATUS, bytes())
@@ -358,10 +410,20 @@ class TuyaBLEDevice:
                     self._ble_device.address, False
                 )
             if self._device_info:
-                self._local_key = self._device_info.local_key[:6].encode()
-                self._login_key = hashlib.md5(self._local_key).digest()
+                self._security_material = TuyaBLESecurityMaterial(
+                    self._device_info.local_key,
+                    (
+                        None
+                        if self.product_id in LEGACY_KEY_DERIVATION_PRODUCT_IDS
+                        else self._device_info.sec_key
+                    ),
+                )
+                self._local_key = self._security_material.pairing_login_key
+                self._login_key = self._security_material.login_key
 
-                self.append_functions(self._device_info.functions, self._device_info.status_range)
+                self.append_functions(
+                    self._device_info.functions, self._device_info.status_range
+                )
 
         return self._device_info is not None
 
@@ -371,7 +433,6 @@ class TuyaBLEDevice:
                 dpcode = f.get("code")
                 if dpcode:
                     self.function[dpcode] = TuyaBLEDeviceFunction(**f)
-                        
             for f in status_range:
                 dpcode = f.get("code")
                 if dpcode:
@@ -380,7 +441,6 @@ class TuyaBLEDevice:
     def update_description(self, description: TuyaBLEEntityDescription | None) -> None:
         if not description:
             return
-        
         self.append_functions(description.function, description.status_range)
 
         if description.values_overrides:
@@ -407,8 +467,13 @@ class TuyaBLEDevice:
         raw_uuid: bytes | None = None
         if self._advertisement_data:
             if self._advertisement_data.service_data:
-                service_data = self._advertisement_data.service_data.get(
-                    SERVICE_UUID)
+                service_data = None
+                for service_uuid in SERVICE_UUIDS:
+                    service_data = self._advertisement_data.service_data.get(
+                        service_uuid
+                    )
+                    if service_data:
+                        break
                 if service_data and len(service_data) > 1:
                     match service_data[0]:
                         case 0:
@@ -440,13 +505,8 @@ class TuyaBLEDevice:
         """Get the name of the device."""
         if self._device_info:
             return self._device_info.device_name
-        else:
-            return self._ble_device.name or self._ble_device.address
 
-    @property
-    def connected(self) -> bool:
-        """Return if connected to device."""
-        return self._client is not None and self._client.is_connected and self._is_paired
+        return self._ble_device.name or self._ble_device.address
 
     @property
     def rssi(self) -> int | None:
@@ -457,52 +517,59 @@ class TuyaBLEDevice:
 
     @property
     def uuid(self) -> str:
+        """UUID"""
         if self._device_info is not None:
             return self._device_info.uuid
-        else:
-            return ""
+
+        if self._uuid is not None:
+            return self._uuid
+
+        return ""
 
     @property
     def local_key(self) -> str:
+        """Local key"""
         if self._device_info is not None:
             return self._device_info.local_key
-        else:
-            return ""
+
+        return ""
 
     @property
     def category(self) -> str:
         if self._device_info is not None:
             return self._device_info.category
-        else:
-            return ""
+
+        return ""
 
     @property
     def device_id(self) -> str:
         if self._device_info is not None:
             return self._device_info.device_id
-        else:
-            return ""
+
+        return ""
 
     @property
     def product_id(self) -> str:
+        """Product ID"""
         if self._device_info is not None:
             return self._device_info.product_id
-        else:
-            return ""
+
+        return ""
 
     @property
     def product_model(self) -> str:
+        """Produce model"""
         if self._device_info is not None:
             return self._device_info.product_model
-        else:
-            return ""
+
+        return ""
 
     @property
     def product_name(self) -> str:
         if self._device_info is not None:
             return self._device_info.product_name
-        else:
-            return ""
+
+        return ""
 
     @property
     def function(self) -> dict(str, dict):
@@ -545,6 +612,22 @@ class TuyaBLEDevice:
                     if v:
                         result[dpcode] = v.value
         return result
+
+    def datapoint_log_payload(self) -> dict[Hashable, Any]:
+        """Creates a dict of printable values"""
+        item = {}
+        for key, value in self.datapoints.__dict__().items():
+            if isinstance(value, TuyaBLEDataPoint):
+                printable_value = value.value
+            else:
+                printable_value = value
+            item[key] = printable_value
+        return item
+
+    @property
+    def last_data_received(self) -> datetime | None:
+        """Last data received"""
+        return self._datapoints.last_data_received
 
     def get_or_create_datapoint(
         self,
@@ -603,22 +686,6 @@ class TuyaBLEDevice:
         self._disconnected_callbacks.append(callback)
         return unregister_callback
 
-    def _fire_connection_status_callbacks(self) -> None:
-        """Fire the callbacks."""
-        for callback in self._connection_status_callbacks:
-            callback()
-
-    def register_connection_status_callback(
-        self, callback: Callable[[], None]
-    ) -> Callable[[], None]:
-        """Register a callback to be called when connection status changes."""
-
-        def unregister_callback() -> None:
-            self._connection_status_callbacks.remove(callback)
-
-        self._connection_status_callbacks.append(callback)
-        return unregister_callback
-
     async def start(self):
         """Start the TuyaBLE."""
         _LOGGER.debug("%s: Starting...", self.address)
@@ -627,12 +694,18 @@ class TuyaBLEDevice:
     async def stop(self) -> None:
         """Stop the TuyaBLE."""
         _LOGGER.debug("%s: Stop", self.address)
+        self._stopped = True
+        for task in (self._reconnect_task, self._idle_task):
+            if task and not task.done():
+                task.cancel()
+        self._idle_task = None
         await self._execute_disconnect()
 
     def _disconnected(self, client: BleakClientWithServiceCache) -> None:
         """Disconnected callback."""
         was_paired = self._is_paired
         self._is_paired = False
+        self._clean_input()
         if self._expected_disconnect:
             _LOGGER.debug(
                 "%s: Disconnected from device; RSSI: %s",
@@ -640,40 +713,120 @@ class TuyaBLEDevice:
                 self.rssi,
             )
             self._fire_disconnected_callbacks()
-            self._fire_connection_status_callbacks()
             return
+        dropped_client = self._client
         self._client = None
-        self._fire_connection_status_callbacks()
-        
+        _LOGGER.warning(
+            "%s: Device unexpectedly disconnected; RSSI: %s",
+            self.address,
+            self.rssi,
+        )
         if was_paired:
-            # Decide whether to schedule an automatic reconnect.
-            # For power-saving switches (category "kg") we want to avoid
-            # persistent reconnect attempts because the device sleeps.
-            is_switch_category = False
-            if getattr(self, "category", None) == "kg":
-                is_switch_category = True
-
-            # Don't reconnect if device is switch
-            if is_switch_category:
-                _LOGGER.debug(
-                    "%s: Device unexpectedly disconnected, but category indicates a switch (category=%s); not scheduling automatic reconnect",
-                    self.address,
-                    getattr(self, "category", None),
-                )
-            # Schedule reconnect
-            else:
-                _LOGGER.warning(
-                    "%s: Device unexpectedly disconnected, scheduling reconnect; RSSI: %s",
-                    self.address,
-                    self.rssi,
-                )
-                asyncio.create_task(self._reconnect())
-        else:
-            _LOGGER.warning(
-                "%s: Device unexpectedly disconnected; RSSI: %s",
+            _LOGGER.debug(
+                "%s: Scheduling reconnect; RSSI: %s",
                 self.address,
                 self.rssi,
             )
+            if self._keep_connection:
+                asyncio.create_task(self._release_and_reconnect(dropped_client))
+            else:
+                asyncio.create_task(self._release_client(dropped_client))
+        elif dropped_client is not None:
+            asyncio.create_task(self._release_client(dropped_client))
+
+    # ---- on-demand connection handling ----
+
+    def _touch(self) -> None:
+        """Note activity; (re)start the idle timer in on-demand mode."""
+        if self._keep_connection or self._stopped:
+            return
+        if self._idle_task and not self._idle_task.done():
+            self._idle_task.cancel()
+        self._idle_task = asyncio.create_task(self._idle_disconnect())
+
+    async def _idle_disconnect(self) -> None:
+        """Drop the link after a period without traffic."""
+        try:
+            await asyncio.sleep(self._idle_disconnect_delay)
+            while self._operation_lock.locked() or self._input_expected_responses:
+                await asyncio.sleep(1)
+            if self._stopped or not (self._client and self._client.is_connected):
+                return
+            _LOGGER.debug(
+                "%s: Idle for %ss, disconnecting",
+                self.address,
+                self._idle_disconnect_delay,
+            )
+            self._idle_disconnecting = True
+            try:
+                await asyncio.wait_for(self._execute_disconnect(), 10)
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.debug("%s: Idle disconnect failed", self.address, exc_info=True)
+            finally:
+                await asyncio.sleep(0.5)
+                self._idle_disconnecting = False
+                self._expected_disconnect = False
+                self._is_paired = False
+        except asyncio.CancelledError:
+            pass
+
+    @property
+    def keep_connection(self) -> bool:
+        """Return whether the BLE link is held open permanently."""
+        return self._keep_connection
+
+    @property
+    def idle_disconnect_delay(self) -> int:
+        """Return the idle timeout used in on-demand mode."""
+        return self._idle_disconnect_delay
+
+    @property
+    def reachable(self) -> bool:
+        """Return whether the device has been reached at least once."""
+        return self._last_connected_at is not None
+
+    async def _release_client(self, client: BleakClientWithServiceCache | None) -> None:
+        """Let go of a connection that dropped on us.
+
+        bleak routes notifications through a per-device watcher registered on
+        the shared BlueZ manager at connect time, and only removes it when the
+        client is disconnected. A planned disconnect goes through
+        _execute_disconnect() and cleans up; an unexpected one used to just drop
+        our reference, leaving the watcher registered forever.
+
+        Every reconnect then added another watcher, and each of them delivers
+        every notification to the callback the newest connection registered. So
+        after n connections the parser sees each packet n times, which breaks
+        reassembly: it waits for packet n+1 while copies of packet n arrive,
+        _clean_input() discards the partial response and then takes a copy as
+        the start of a fresh one. Past a handful of reconnects nothing is ever
+        assembled -- the device still shows as connected, commands are accepted
+        and silently do nothing, and only a restart clears it. See #170.
+        """
+        if client is None:
+            return
+        try:
+            await client.disconnect()
+        except Exception:  # noqa: BLE001 - the link is already gone
+            _LOGGER.debug(
+                "%s: Releasing the dropped connection failed",
+                self.address,
+                exc_info=True,
+            )
+
+    async def _release_and_reconnect(
+        self, client: BleakClientWithServiceCache | None
+    ) -> None:
+        """Release the dropped connection, then reconnect.
+
+        Ordered deliberately: the watcher has to go before a new connection
+        registers its own, and doing both in one task is what guarantees it.
+        Releasing is safe at this point precisely because the old link is
+        already down and the new one does not exist yet -- BlueZ's Disconnect
+        acts on the device, so there is nothing here for it to disturb.
+        """
+        await self._release_client(client)
+        self._schedule_reconnect(0)
 
     def _disconnect(self) -> None:
         """Disconnect from device."""
@@ -694,14 +847,22 @@ class TuyaBLEDevice:
             self._expected_disconnect = True
             self._client = None
             if client and client.is_connected:
-                await client.stop_notify(CHARACTERISTIC_NOTIFY)
+                await client.stop_notify(self._characteristic_notify)
                 await client.disconnect()
+        self._clean_input()
         async with self._seq_num_lock:
             self._current_seq_num = 1
 
     async def _ensure_connected(self) -> None:
         """Ensure connection to device is established."""
         global global_connect_lock
+        if self._stopped:
+            return
+        # An idle disconnect may be in flight; let it finish before reconnecting.
+        while self._idle_disconnecting:
+            await asyncio.sleep(0.05)
+        if not self._keep_connection:
+            self._expected_disconnect = False
         if self._expected_disconnect:
             return
         if self._connect_lock.locked():
@@ -718,16 +879,20 @@ class TuyaBLEDevice:
             await asyncio.sleep(0.01)
             if self._client and self._client.is_connected and self._is_paired:
                 return
-            attempts_count = 100
-            while attempts_count > 0:
-                attempts_count -= 1
-                if attempts_count == 0:
+            attempts_count = CONNECT_ATTEMPTS
+            attempt = 0
+            while True:
+                if self._stopped:
+                    return
+                if attempt >= attempts_count:
                     _LOGGER.error(
-                        "%s: Connecting, all attempts failed; RSSI: %s",
+                        "%s: Connecting, all %s attempts failed; RSSI: %s",
                         self.address,
+                        attempts_count,
                         self.rssi,
                     )
-                    raise BleakNotFoundError()
+                    break
+                attempt += 1
                 try:
                     async with global_connect_lock:
                         _LOGGER.debug(
@@ -741,7 +906,8 @@ class TuyaBLEDevice:
                             use_services_cache=True,
                             ble_device_callback=lambda: self._ble_device,
                         )
-                except BleakNotFoundError:
+                except BleakNotFoundError as ex:
+                    self._last_connect_error = str(ex) or "Device not found"
                     _LOGGER.error(
                         "%s: device not found, not in range, or poor RSSI: %s",
                         self.address,
@@ -749,52 +915,80 @@ class TuyaBLEDevice:
                         exc_info=True,
                     )
                     continue
-                except BLEAK_EXCEPTIONS:
+                except BLEAK_EXCEPTIONS as ex:
+                    self._last_connect_error = str(ex)
+                    if "Bluetooth is already shutdown" in str(ex):
+                        _LOGGER.debug(
+                            "%s: Bluetooth is already shutdown, terminating connection attempts",
+                            self.address,
+                        )
+                        raise
                     _LOGGER.debug(
                         "%s: communication failed", self.address, exc_info=True
                     )
                     continue
-                except:
-                    _LOGGER.debug("%s: unexpected error",
-                                  self.address, exc_info=True)
+                except Exception as ex:
+                    self._last_connect_error = str(ex)
+                    if "Bluetooth is already shutdown" in str(ex):
+                        _LOGGER.debug(
+                            "%s: Bluetooth is already shutdown, terminating connection attempts",
+                            self.address,
+                        )
+                        raise
+                    _LOGGER.debug("%s: unexpected error", self.address, exc_info=True)
                     continue
 
                 if client and client.is_connected:
-                    _LOGGER.debug("%s: Connected; RSSI: %s",
-                                  self.address, self.rssi)
+                    _LOGGER.debug("%s: Connected; RSSI: %s", self.address, self.rssi)
                     self._client = client
-                    try:
-                        await self._client.start_notify(
-                            CHARACTERISTIC_NOTIFY, self._notification_handler
-                        )
-                    except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
-                        self._client = None
-                        _LOGGER.error("%s: starting notifications failed",
-                                      self.address, exc_info=True)
+                    self._characteristic_notify = CHARACTERISTIC_NOTIFY
+                    self._characteristic_write = CHARACTERISTIC_WRITE
+                    # Support for additional GATT characteristics from @Shirkamdev
+                    for notify_uuid, write_uuid in SERVICE_CHARACTERISTICS.values():
+                        if client.services.get_characteristic(notify_uuid):
+                            self._characteristic_notify = notify_uuid
+                            self._characteristic_write = write_uuid
+                            break
+                    await asyncio.sleep(POST_CONNECT_DELAY)
+                    if not await self._start_notify_with_retry():
+                        await self._drop_client()
                         continue
                 else:
+                    await self._drop_client()
                     continue
 
                 if self._client and self._client.is_connected:
-                    _LOGGER.debug(
-                        "%s: Sending device info request", self.address)
+                    _LOGGER.debug("%s: Sending device info request", self.address)
                     try:
                         if not await self._send_packet_while_connected(
                             TuyaBLECode.FUN_SENDER_DEVICE_INFO,
-                            bytes(0),
+                            (
+                                b"\x00\xf3"
+                                if self._requires_fd50_device_info_handshake()
+                                else bytes(0)
+                            ),
                             0,
                             True,
                         ):
-                            self._client = None
                             _LOGGER.error(
                                 "%s: Sending device info request failed",
                                 self.address,
                             )
+                            await self._drop_client()
                             continue
-                    except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
-                        self._client = None
-                        _LOGGER.error("%s: Sending device info request failed",
-                                      self.address, exc_info=True)
+                    except Exception as ex:
+                        if "Bluetooth is already shutdown" in str(ex):
+                            _LOGGER.debug(
+                                "%s: Bluetooth is already shutdown, terminating connection attempts",
+                                self.address,
+                            )
+                            raise
+                        _LOGGER.error(
+                            "%s: Sending device info request failed",
+                            self.address,
+                            exc_info=True,
+                        )
+                        await self._drop_client()
                         continue
                 else:
                     continue
@@ -808,28 +1002,42 @@ class TuyaBLEDevice:
                             0,
                             True,
                         ):
-                            self._client = None
                             _LOGGER.error(
                                 "%s: Sending pairing request failed",
                                 self.address,
                             )
+                            await self._drop_client()
                             continue
-                    except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
-                        self._client = None
-                        _LOGGER.error("%s: Sending pairing request failed",
-                                      self.address, exc_info=True)
+                    except Exception as ex:
+                        if "Bluetooth is already shutdown" in str(ex):
+                            _LOGGER.debug(
+                                "%s: Bluetooth is already shutdown, terminating connection attempts",
+                                self.address,
+                            )
+                            raise
+                        _LOGGER.error(
+                            "%s: Sending pairing request failed",
+                            self.address,
+                            exc_info=True,
+                        )
+                        await self._drop_client()
                         continue
                 else:
                     continue
 
                 break
 
+        if self._stopped:
+            return
         if self._client:
             if self._client.is_connected:
                 if self._is_paired:
                     _LOGGER.debug("%s: Successfully connected", self.address)
+                    self._reconnect_backoff = RECONNECT_BACKOFF_MIN
+                    self._last_connect_error = None
+                    self._last_connected_at = time.monotonic()
                     self._fire_connected_callbacks()
-                    self._fire_connection_status_callbacks()
+                    self._touch()
                 else:
                     _LOGGER.error("%s: Connected but not paired", self.address)
             else:
@@ -837,27 +1045,123 @@ class TuyaBLEDevice:
         else:
             _LOGGER.error("%s: No client device", self.address)
 
-    async def _reconnect(self) -> None:
-        """Attempt a reconnect"""
+        if not (self._client and self._client.is_connected and self._is_paired):
+            self._schedule_reconnect(self._next_backoff())
+            raise BleakNotFoundError()
+
+    async def _start_notify_with_retry(self) -> bool:
+        """Subscribe to notifications; retry transient GATT errors (e.g. 133)."""
+        for attempt in range(1, NOTIFY_ATTEMPTS + 1):
+            if self._stopped or not (self._client and self._client.is_connected):
+                return False
+            try:
+                notify_kwargs = (
+                    {"bluez": {"use_start_notify": True}}
+                    if self._requires_fd50_device_info_handshake()
+                    else {}
+                )
+                await self._client.start_notify(
+                    self._characteristic_notify,
+                    self._notification_handler,
+                    **notify_kwargs,
+                )
+                return True
+            except BLEAK_EXCEPTIONS as ex:
+                if attempt < NOTIFY_ATTEMPTS and self._client.is_connected:
+                    _LOGGER.warning(
+                        "%s: starting notifications failed (attempt %s/%s, retrying): %s",
+                        self.address,
+                        attempt,
+                        NOTIFY_ATTEMPTS,
+                        ex,
+                    )
+                    await asyncio.sleep(NOTIFY_RETRY_DELAY)
+                    continue
+                _LOGGER.error(
+                    "%s: starting notifications failed",
+                    self.address,
+                    exc_info=True,
+                )
+                return False
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.error(
+                    "%s: starting notifications failed",
+                    self.address,
+                    exc_info=True,
+                )
+                return False
+        return False
+
+    async def _drop_client(self) -> None:
+        """Forget the current client and really close the link so the
+        adapter/proxy slot is freed before the next attempt."""
+        client = self._client
+        self._client = None
+        self._is_paired = False
+        if client is None:
+            return
+        try:
+            self._expected_disconnect = True
+            await asyncio.wait_for(client.disconnect(), 5)
+        except Exception:  # pylint: disable=broad-except
+            _LOGGER.debug("%s: dropping client failed", self.address, exc_info=True)
+        finally:
+            if not self._stopped:
+                self._expected_disconnect = False
+
+    def _next_backoff(self) -> float:
+        delay = self._reconnect_backoff
+        self._reconnect_backoff = min(
+            self._reconnect_backoff * 2, RECONNECT_BACKOFF_MAX
+        )
+        return delay
+
+    def _schedule_reconnect(self, delay: float) -> None:
+        """Schedule a single reconnect attempt after delay (deduplicated)."""
+        if self._stopped:
+            return
+        if (
+            self._reconnect_task
+            and not self._reconnect_task.done()
+            and asyncio.current_task() != self._reconnect_task
+        ):
+            return
+        self._reconnect_task = asyncio.create_task(self._reconnect(delay))
+
+    async def _reconnect(self, delay: float = 0) -> None:
+        """Attempt a reconnect after an optional delay."""
+        if delay > 0:
+            _LOGGER.debug("%s: Reconnect in %.0f s", self.address, delay)
+            await asyncio.sleep(delay)
+        if self._stopped:
+            return
         _LOGGER.debug("%s: Reconnect, ensuring connection", self.address)
         async with self._seq_num_lock:
             self._current_seq_num = 1
         try:
-            if self._expected_disconnect:
-                return
             await self._ensure_connected()
-            if self._expected_disconnect:
+            if self._stopped:
                 return
             _LOGGER.debug("%s: Reconnect, connection ensured", self.address)
-        except BLEAK_EXCEPTIONS:  # BleakNotFoundError:
+        except BLEAK_EXCEPTIONS:
+            # _ensure_connected already scheduled the next attempt with backoff
+            _LOGGER.debug("%s: Reconnect failed", self.address)
+        except Exception:  # pylint: disable=broad-except
             _LOGGER.debug(
-                "%s: Reconnect, failed to ensure connection - backing off",
-                self.address,
-                exc_info=True,
+                "%s: Reconnect, unexpected error", self.address, exc_info=True
             )
-            await asyncio.sleep(BLEAK_BACKOFF_TIME)
-            _LOGGER.debug("%s: Reconnecting again", self.address)
-            asyncio.create_task(self._reconnect())
+
+    @property
+    def is_connected(self) -> bool:
+        return bool(self._client and self._client.is_connected and self._is_paired)
+
+    @property
+    def last_connect_error(self) -> str | None:
+        return self._last_connect_error
+
+    @property
+    def last_connected_at(self) -> float | None:
+        return self._last_connected_at
 
     @staticmethod
     def _calc_crc16(data: bytes) -> int:
@@ -913,12 +1217,16 @@ class TuyaBLEDevice:
         key: bytes
         iv = secrets.token_bytes(16)
         security_flag: bytes
+        fd50_device_info = (
+            code == TuyaBLECode.FUN_SENDER_DEVICE_INFO
+            and self._requires_fd50_device_info_handshake()
+        )
         if code == TuyaBLECode.FUN_SENDER_DEVICE_INFO:
             key = self._login_key
-            security_flag = b"\x04"
+            security_flag = pack(">B", self._security_material.login_flag)
         else:
             key = self._session_key
-            security_flag = b"\x05"
+            security_flag = pack(">B", self._security_material.session_flag)
 
         raw = bytearray()
         raw += pack(">IIHH", seq_num, response_to, code.value, len(data))
@@ -941,7 +1249,10 @@ class TuyaBLEDevice:
 
             if packet_num == 0:
                 packet += self._pack_int(length)
-                packet += pack(">B", self._protocol_version << 4)
+                packet_protocol_version = (
+                    2 if fd50_device_info else self._protocol_version
+                )
+                packet += pack(">B", packet_protocol_version << 4)
 
             data_part = encrypted[
                 pos:pos + GATT_MTU - len(packet)  # fmt: skip
@@ -968,12 +1279,13 @@ class TuyaBLEDevice:
         # retry: int | None = None,
     ) -> None:
         """Send packet to device and optional read response."""
-        if self._expected_disconnect:
+        if self._stopped:
             return
         await self._ensure_connected()
-        if self._expected_disconnect:
+        if self._stopped:
             return
         await self._send_packet_while_connected(code, data, 0, wait_for_response)
+        self._touch()
 
     async def _send_response(
         self,
@@ -1016,8 +1328,7 @@ class TuyaBLEDevice:
                 seq_num,
                 code.name,
             )
-        packets: list[bytes] = self._build_packets(
-            seq_num, code, data, response_to)
+        packets: list[bytes] = self._build_packets(seq_num, code, data, response_to)
         await self._int_send_packet_while_connected(packets)
         if future:
             try:
@@ -1030,6 +1341,8 @@ class TuyaBLEDevice:
                 )
                 result = False
             self._input_expected_responses.pop(seq_num, None)
+            if self._stopped:
+                result = False
 
         return result
 
@@ -1064,10 +1377,10 @@ class TuyaBLEDevice:
                 raise
 
     async def _resend_packets(self, packets: list[bytes]) -> None:
-        if self._expected_disconnect:
+        if self._stopped:
             return
         await self._ensure_connected()
-        if self._expected_disconnect:
+        if self._stopped:
             return
         await self._int_send_packet_while_connected(packets)
 
@@ -1076,6 +1389,12 @@ class TuyaBLEDevice:
         try:
             await self._int_send_packets_locked(packets)
         except BleakDBusError as ex:
+            if "Bluetooth is already shutdown" in str(ex):
+                _LOGGER.debug(
+                    "%s: Bluetooth is already shutdown, not resending packets or reconnecting",
+                    self.address,
+                )
+                raise BleakError("Bluetooth is already shutdown") from ex
             # Disconnect so we can reset state and try again
             await asyncio.sleep(BLEAK_BACKOFF_TIME)
             _LOGGER.debug(
@@ -1088,9 +1407,15 @@ class TuyaBLEDevice:
             if self._is_paired:
                 asyncio.create_task(self._resend_packets(packets))
             else:
-                asyncio.create_task(self._reconnect())
+                self._schedule_reconnect(0)
             raise BleakError from ex
         except BleakError as ex:
+            if "Bluetooth is already shutdown" in str(ex):
+                _LOGGER.debug(
+                    "%s: Bluetooth is already shutdown, not resending packets or reconnecting",
+                    self.address,
+                )
+                raise
             # Disconnect so we can reset state and try again
             _LOGGER.debug(
                 "%s: RSSI: %s; Disconnecting due to error: %s",
@@ -1101,7 +1426,7 @@ class TuyaBLEDevice:
             if self._is_paired:
                 asyncio.create_task(self._resend_packets(packets))
             else:
-                asyncio.create_task(self._reconnect())
+                self._schedule_reconnect(0)
             raise
 
     async def _int_send_packets_locked(self, packets: list[bytes]) -> None:
@@ -1111,11 +1436,17 @@ class TuyaBLEDevice:
                 try:
                     # _LOGGER.debug("%s: Sending packet: %s", self.address, packet.hex())
                     await self._client.write_gatt_char(
-                        CHARACTERISTIC_WRITE,
+                        self._characteristic_write,
                         packet,
                         False,
                     )
-                except:
+                except Exception as ex:
+                    if "Bluetooth is already shutdown" in str(ex):
+                        _LOGGER.debug(
+                            "%s: Bluetooth is already shutdown during sending packet",
+                            self.address,
+                        )
+                        raise BleakError("Bluetooth is already shutdown") from ex
                     _LOGGER.error(
                         "%s: Error during sending packet",
                         self.address,
@@ -1137,10 +1468,12 @@ class TuyaBLEDevice:
             return self._auth_key
         if security_flag == 4:
             return self._login_key
-        elif security_flag == 5:
+        if security_flag == 5:
             return self._session_key
-        else:
-            pass
+        if security_flag == 14:
+            return self._login_key
+        if security_flag == 15:
+            return self._session_key
 
     def _parse_timestamp(self, data: bytes, start_pos: int) -> tuple(float, int):
         timestamp: float
@@ -1173,13 +1506,23 @@ class TuyaBLEDevice:
         )
         return (timestamp, end_pos)
 
-    def _parse_datapoints_v3(
-        self, timestamp: float, flags: int, data: bytes, start_pos: int
+    def _parse_datapoints(
+        self,
+        timestamp: float,
+        flags: int,
+        data: bytes,
+        start_pos: int,
+        length_size: int,
     ) -> int:
+        """Parse Tuya KLV datapoints with the requested value-length width."""
+        if length_size not in (1, 2):
+            raise ValueError("Tuya KLV length width must be one or two bytes")
+
         datapoints: list[TuyaBLEDataPoint] = []
 
         pos = start_pos
-        while len(data) - pos >= 4:
+        header_size = 2 + length_size
+        while len(data) - pos >= header_size:
             id: int = data[pos]
             pos += 1
             _type: int = data[pos]
@@ -1187,18 +1530,18 @@ class TuyaBLEDevice:
                 raise TuyaBLEDataFormatError()
             type: TuyaBLEDataPointType = TuyaBLEDataPointType(_type)
             pos += 1
-            data_len: int = data[pos]
-            pos += 1
+            data_len = int.from_bytes(data[pos : pos + length_size], "big")
+            pos += length_size
             next_pos = pos + data_len
             if next_pos > len(data):
                 raise TuyaBLEDataLengthError()
             raw_value = data[pos:next_pos]
             match type:
-                case (TuyaBLEDataPointType.DT_RAW | TuyaBLEDataPointType.DT_BITMAP):
+                case TuyaBLEDataPointType.DT_RAW | TuyaBLEDataPointType.DT_BITMAP:
                     value = raw_value
                 case TuyaBLEDataPointType.DT_BOOL:
                     value = int.from_bytes(raw_value, "big") != 0
-                case (TuyaBLEDataPointType.DT_VALUE | TuyaBLEDataPointType.DT_ENUM):
+                case TuyaBLEDataPointType.DT_VALUE | TuyaBLEDataPointType.DT_ENUM:
                     value = int.from_bytes(raw_value, "big", signed=True)
                 case TuyaBLEDataPointType.DT_STRING:
                     value = raw_value.decode()
@@ -1210,12 +1553,24 @@ class TuyaBLEDevice:
                 type.name,
                 value,
             )
-            self._datapoints._update_from_device(
-                id, timestamp, flags, type, value)
+            self._datapoints._update_from_device(id, timestamp, flags, type, value)
             datapoints.append(self._datapoints[id])
             pos = next_pos
 
         self._fire_callbacks(datapoints)
+        return pos
+
+    def _parse_datapoints_v3(
+        self, timestamp: float, flags: int, data: bytes, start_pos: int
+    ) -> int:
+        """Parse Tuya BLE protocol-v3 datapoints."""
+        return self._parse_datapoints(timestamp, flags, data, start_pos, 1)
+
+    def _parse_datapoints_v4(
+        self, timestamp: float, flags: int, data: bytes, start_pos: int
+    ) -> int:
+        """Parse Tuya BLE protocol-v4 datapoints."""
+        return self._parse_datapoints(timestamp, flags, data, start_pos, 2)
 
     def _handle_command_or_response(
         self, seq_num: int, response_to: int, code: TuyaBLECode, data: bytes
@@ -1236,8 +1591,7 @@ class TuyaBLEDevice:
                 self._is_bound = data[5] != 0
 
                 srand = data[6:12]
-                self._session_key = hashlib.md5(
-                    self._local_key + srand).digest()
+                self._session_key = self._security_material.session_key(srand)
                 self._auth_key = data[14:46]
 
             case TuyaBLECode.FUN_SENDER_PAIR:
@@ -1256,6 +1610,11 @@ class TuyaBLEDevice:
                 if len(data) != 1:
                     raise TuyaBLEDataLengthError()
                 result = data[0]
+
+            case TuyaBLECode.FUN_SENDER_DPS_V4:
+                if len(data) != 6:
+                    raise TuyaBLEDataLengthError()
+                result = data[5]
 
             case TuyaBLECode.FUN_RECEIVE_TIME1_REQ:
                 if len(data) != 0:
@@ -1287,8 +1646,7 @@ class TuyaBLEDevice:
 
             case TuyaBLECode.FUN_RECEIVE_DP:
                 self._parse_datapoints_v3(time.time(), 0, data, 0)
-                asyncio.create_task(
-                    self._send_response(code, bytes(0), seq_num))
+                asyncio.create_task(self._send_response(code, bytes(0), seq_num))
 
             case TuyaBLECode.FUN_RECEIVE_SIGN_DP:
                 dp_seq_num = int.from_bytes(data[:2], "big")
@@ -1302,8 +1660,7 @@ class TuyaBLEDevice:
                 pos: int
                 timestamp, pos = self._parse_timestamp(data, 0)
                 self._parse_datapoints_v3(timestamp, 0, data, pos)
-                asyncio.create_task(
-                    self._send_response(code, bytes(0), seq_num))
+                asyncio.create_task(self._send_response(code, bytes(0), seq_num))
 
             case TuyaBLECode.FUN_RECEIVE_SIGN_TIME_DP:
                 timestamp: float
@@ -1314,6 +1671,33 @@ class TuyaBLEDevice:
                 self._parse_datapoints_v3(time.time(), flags, data, pos)
                 data = pack(">HBB", dp_seq_num, flags, 0)
                 asyncio.create_task(self._send_response(code, data, seq_num))
+
+            case TuyaBLECode.FUN_RECEIVE_DP_V4:
+                if len(data) < 7:
+                    raise TuyaBLEDataLengthError()
+                if data[0] != 0:
+                    raise TuyaBLEDataFormatError()
+                send_flags = data[5]
+                mode = data[6]
+                self._parse_datapoints_v4(time.time(), mode, data, 7)
+                if (send_flags & 0x80) == 0:
+                    asyncio.create_task(
+                        self._send_response(code, data[:7] + b"\x00", seq_num)
+                    )
+
+            case TuyaBLECode.FUN_RECEIVE_TIME_DP_V4:
+                if len(data) < 8:
+                    raise TuyaBLEDataLengthError()
+                if data[0] != 0:
+                    raise TuyaBLEDataFormatError()
+                send_flags = data[5]
+                mode = data[6]
+                timestamp, pos = self._parse_timestamp(data, 7)
+                self._parse_datapoints_v4(timestamp, mode, data, pos)
+                if (send_flags & 0x80) == 0:
+                    asyncio.create_task(
+                        self._send_response(code, data[:7] + b"\x00", seq_num)
+                    )
 
         if response_to != 0:
             future = self._input_expected_responses.pop(response_to, None)
@@ -1407,8 +1791,16 @@ class TuyaBLEDevice:
         packet_num, pos = self._unpack_int(data, pos)
 
         if packet_num < self._input_expected_packet_num:
+            if packet_num != 0:
+                _LOGGER.warning(
+                    "%s: Unexpected packet (number %s) in notifications, expected %s. Ignoring.",
+                    self.address,
+                    packet_num,
+                    self._input_expected_packet_num,
+                )
+                return
             _LOGGER.error(
-                "%s: Unexpcted packet (number %s) in notifications, " "expected %s",
+                "%s: Unexpected packet (number %s) in notifications, " "expected %s",
                 self.address,
                 packet_num,
                 self._input_expected_packet_num,
@@ -1434,7 +1826,7 @@ class TuyaBLEDevice:
 
         if len(self._input_buffer) > self._input_expected_length:
             _LOGGER.error(
-                "%s: Unexpcted length of data in notifications, "
+                "%s: Unexpected length of data in notifications, "
                 "received %s expected %s",
                 self.address,
                 len(self._input_buffer),
@@ -1442,11 +1834,25 @@ class TuyaBLEDevice:
             )
             self._clean_input()
             return
-        elif len(self._input_buffer) == self._input_expected_length:
-            self._parse_input()
 
-    async def _send_datapoints_v3(self, datapoint_ids: list[int]) -> None:
-        """Send new values of datapoints to the device."""
+        if len(self._input_buffer) == self._input_expected_length:
+            try:
+                self._parse_input()
+            except TuyaBLEError as err:
+                _LOGGER.error(
+                    "%s: Error parsing input: %s",
+                    self.address,
+                    err,
+                    exc_info=True,
+                )
+                self._clean_input()
+                return
+
+    def _encode_datapoints(self, datapoint_ids: list[int], length_size: int) -> bytes:
+        """Encode datapoints with the requested Tuya KLV value-length width."""
+        if length_size not in (1, 2):
+            raise ValueError("Tuya KLV length width must be one or two bytes")
+
         data = bytearray()
         for dp_id in datapoint_ids:
             dp = self._datapoints[dp_id]
@@ -1458,14 +1864,58 @@ class TuyaBLEDevice:
                 dp.type.name,
                 dp.value,
             )
-            data += pack(">BBB", dp.id, int(dp.type.value), len(value))
+            if length_size == 1:
+                data += pack(">BBB", dp.id, int(dp.type.value), len(value))
+            else:
+                data += pack(">BBH", dp.id, int(dp.type.value), len(value))
             data += value
 
+        return bytes(data)
+
+    async def _send_datapoints_v3(self, datapoint_ids: list[int]) -> None:
+        """Send new values using the protocol-v3 DP command."""
+        data = self._encode_datapoints(datapoint_ids, 1)
         await self._send_packet(TuyaBLECode.FUN_SENDER_DPS, data)
+
+    async def _send_datapoints_v4(self, datapoint_ids: list[int]) -> None:
+        """Send new values using the protocol-v4 DP command."""
+        dp_seq_num = await self._get_seq_num()
+        data = pack(">BI", 0, dp_seq_num)
+        data += self._encode_datapoints(datapoint_ids, 2)
+        await self._send_packet(TuyaBLECode.FUN_SENDER_DPS_V4, data)
 
     async def _send_datapoints(self, datapoint_ids: list[int]) -> None:
         """Send new values of datapoints to the device."""
         if self._protocol_version == 3:
             await self._send_datapoints_v3(datapoint_ids)
+        elif self._protocol_version >= 4:
+            await self._send_datapoints_v4(datapoint_ids)
         else:
             raise TuyaBLEDeviceError(0)
+
+    async def set_multiple_values(self, dp_updates: dict[int, Any]) -> None:
+        """Set multiple datapoint values in a single atomic BLE payload."""
+        updated_dps = []
+        for dp_id, value in dp_updates.items():
+            dp = self._datapoints[dp_id]
+            if not dp:
+                continue
+
+            # Update the internal state safely
+            if dp.type in [TuyaBLEDataPointType.DT_RAW, TuyaBLEDataPointType.DT_BITMAP]:
+                dp._value = bytes(value)
+            elif dp.type == TuyaBLEDataPointType.DT_BOOL:
+                dp._value = bool(value)
+            elif dp.type == TuyaBLEDataPointType.DT_VALUE:
+                dp._value = int(value)
+            elif dp.type == TuyaBLEDataPointType.DT_ENUM:
+                dp._value = int(value)
+            elif dp.type == TuyaBLEDataPointType.DT_STRING:
+                dp._value = str(value)
+            dp._changed_by_device = False
+            updated_dps.append(dp)
+
+        if not updated_dps:
+            return
+        await self._send_datapoints([dp.id for dp in updated_dps])
+        self._fire_callbacks(updated_dps)

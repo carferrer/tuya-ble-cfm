@@ -5,14 +5,27 @@
     {
       "connectable": true,
       "service_data_uuid": "0000a201-0000-1000-8000-00805f9b34fb"
+    },
+    {
+      "connectable": true,
+      "service_data_uuid": "0000fd50-0000-1000-8000-00805f9b34fb"
     }
   ],
-  "codeowners": ["@carferrer"],
+  "codeowners": [
+    "@carferrer"
+  ],
   "config_flow": true,
-  "dependencies": ["bluetooth_adapters", "tuya"],
+  "dependencies": [
+    "bluetooth_adapters",
+    "tuya"
+  ],
   "documentation": "https://github.com/carferrer/tuya-ble-cfm",
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/carferrer/tuya-ble-cfm/issues",
-  "requirements": ["tuya-iot-py-sdk==0.6.6", "pycountry>23.0.0"],
-  "version": "0.3.1"
+  "requirements": [
+    "tuya-iot-py-sdk==0.6.6",
+    "tuya-mobile==1.2.0",
+    "pycountry>23.0.0"
+  ],
+  "version": "0.12.1-cfm.1"
 }

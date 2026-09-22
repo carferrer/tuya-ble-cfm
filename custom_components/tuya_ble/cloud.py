@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 from typing import Any, Iterable
 
@@ -17,6 +17,9 @@ from homeassistant.const import (
 )
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from tuya_mobile import TuyaMobileApiError, TuyaPasswordClient
 
 from tuya_iot import (
     TuyaOpenAPI,
@@ -38,6 +41,8 @@ from .const import (
     CONF_PRODUCT_MODEL,
     CONF_UUID,
     CONF_LOCAL_KEY,
+    CONF_MOBILE_APP,
+    CONF_SEC_KEY,
     CONF_CATEGORY,
     CONF_PRODUCT_ID,
     CONF_DEVICE_NAME,
@@ -52,6 +57,7 @@ from .const import (
     TUYA_RESPONSE_RESULT,
     TUYA_RESPONSE_SUCCESS,
 )
+from .mobile import get_mobile_endpoint
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -90,6 +96,10 @@ CONF_TUYA_DEVICE_KEYS = [
 _cache: dict[str, TuyaCloudCacheItem] = {}
 
 
+class TuyaMobileIdentityMismatch(TuyaMobileApiError):
+    """Mobile credentials do not belong to the OpenAPI device."""
+
+
 class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
     """Cloud connected manager of the Tuya BLE devices credentials."""
 
@@ -125,7 +135,7 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
         """Login into Tuya cloud using credentials from data dictionary."""
         global _cache
 
-        if len(data) == 0:
+        if len(data) == 0 or not self._has_login(data):
             return {}
 
         api = TuyaOpenAPI(
@@ -185,10 +195,14 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                     if fi_response_result and len(fi_response_result) > 0:
                         factory_info = fi_response_result[0]
                         if factory_info and (TUYA_FACTORY_INFO_MAC in factory_info):
-                            mac = ":".join(
-                                factory_info[TUYA_FACTORY_INFO_MAC][i : i + 2]
-                                for i in range(0, 12, 2)
-                            ).upper()
+                            raw_mac = factory_info[TUYA_FACTORY_INFO_MAC]
+                            if ":" in raw_mac:
+                                # API already returned a colon-separated MAC
+                                mac = raw_mac.upper()
+                            else:
+                                mac = ":".join(
+                                    raw_mac[i : i + 2] for i in range(0, 12, 2)
+                                ).upper()
                             item.credentials[mac] = {
                                 CONF_ADDRESS: mac,
                                 CONF_UUID: device.get("uuid"),
@@ -200,6 +214,21 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                                 CONF_PRODUCT_MODEL: device.get("model"),
                                 CONF_PRODUCT_NAME: device.get("product_name"),
                             }
+                            sec_key = device.get("sec_key") or device.get("secKey")
+                            if sec_key:
+                                item.credentials[mac][CONF_SEC_KEY] = sec_key
+
+                            # Some devices (e.g. jtmspro knob locks) report the
+                            # MAC byte-reversed in the cloud factory info
+                            # compared to what they advertise over BLE, so the
+                            # credentials can never be matched to the scanned
+                            # device. Index the same entry under the reversed
+                            # address too. Existing keys win, so a device that
+                            # genuinely owns that address is never clobbered.
+                            reversed_mac = ":".join(reversed(mac.split(":")))
+                            item.credentials.setdefault(
+                                reversed_mac, item.credentials[mac]
+                            )
 
                             spec_response = await self._hass.async_add_executor_job(
                                 item.api.get,
@@ -240,6 +269,8 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
         for config_entry in tuya_config_entries:
             data.clear()
             data.update(config_entry.data)
+            if not self._has_login(data):
+                continue
             key = self._get_cache_key(data)
             item = _cache.get(key)
             if item is None or len(item.credentials) == 0:
@@ -252,6 +283,8 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
         for config_entry in ble_config_entries:
             data.clear()
             data.update(config_entry.options)
+            if not self._has_login(data):
+                continue
             key = self._get_cache_key(data)
             item = _cache.get(key)
             if item is None or len(item.credentials) == 0:
@@ -296,12 +329,22 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                 if self._is_login_success(await self.login(True)):
                     item = _cache.get(cache_key)
                     if item:
-                        await self._fill_cache_item(item)
+                        if force_update:
+                            refreshed_item = TuyaCloudCacheItem(
+                                item.api,
+                                item.login,
+                                {},
+                            )
+                            await self._fill_cache_item(refreshed_item)
+                            item.credentials = refreshed_item.credentials
+                        else:
+                            await self._fill_cache_item(item)
 
             if item:
                 credentials = item.credentials.get(address)
 
         if credentials:
+            sec_key = credentials.get(CONF_SEC_KEY) or self._data.get(CONF_SEC_KEY)
             result = TuyaBLEDeviceCredentials(
                 credentials.get(CONF_UUID, ""),
                 credentials.get(CONF_LOCAL_KEY, ""),
@@ -313,13 +356,75 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                 credentials.get(CONF_PRODUCT_NAME, ""),
                 credentials.get(CONF_FUNCTIONS, []),
                 credentials.get(CONF_STATUS_RANGE, []),
+                sec_key=sec_key,
             )
             _LOGGER.debug("Retrieved: %s", result)
             if save_data:
                 if item:
                     self._data.update(item.login)
                 self._data.update(credentials)
+                if sec_key:
+                    self._data[CONF_SEC_KEY] = sec_key
 
+        return result
+
+    async def get_mobile_device_credentials(
+        self,
+        cloud_credentials: TuyaBLEDeviceCredentials,
+        save_data: bool = False,
+    ) -> TuyaBLEDeviceCredentials:
+        """Retrieve and validate an atomic mobile localKey/SecKey pair."""
+        mobile_app = self._data.get(CONF_MOBILE_APP)
+        if not mobile_app:
+            raise TuyaMobileApiError("No Tuya mobile application was selected")
+
+        client = TuyaPasswordClient.for_application(
+            mobile_app,
+            async_get_clientsession(self._hass),
+            username=self._data.get(CONF_USERNAME, ""),
+            endpoint=get_mobile_endpoint(self._data.get(CONF_ENDPOINT, "")),
+        )
+        await client.login_with_password(
+            self._data.get(CONF_PASSWORD, ""),
+            self._data.get(CONF_COUNTRY_CODE, ""),
+        )
+        mobile_credentials = await client.get_device_credentials(
+            cloud_credentials.device_id
+        )
+
+        if mobile_credentials.device_id != cloud_credentials.device_id:
+            raise TuyaMobileIdentityMismatch(
+                "Tuya mobile device ID does not match the OpenAPI device"
+            )
+        if (
+            mobile_credentials.uuid
+            and cloud_credentials.uuid
+            and mobile_credentials.uuid != cloud_credentials.uuid
+        ):
+            raise TuyaMobileIdentityMismatch(
+                "Tuya mobile UUID does not match the OpenAPI device"
+            )
+        if (
+            mobile_credentials.product_id
+            and cloud_credentials.product_id
+            and mobile_credentials.product_id != cloud_credentials.product_id
+        ):
+            raise TuyaMobileIdentityMismatch(
+                "Tuya mobile product does not match the OpenAPI device"
+            )
+
+        result = replace(
+            cloud_credentials,
+            local_key=mobile_credentials.local_key,
+            sec_key=mobile_credentials.sec_key,
+        )
+        if save_data:
+            self._data.update(
+                {
+                    CONF_LOCAL_KEY: mobile_credentials.local_key,
+                    CONF_SEC_KEY: mobile_credentials.sec_key,
+                }
+            )
         return result
 
     @property

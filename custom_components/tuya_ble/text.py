@@ -13,6 +13,7 @@ from homeassistant.components.text import (
     TextEntityDescription,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -147,7 +148,12 @@ mapping: dict[str, TuyaBLECategoryTextMapping] = {
     "dcb": TuyaBLECategoryTextMapping(
         products={
             **dict.fromkeys(
-                ["ajrhf1aj", "z5ztlw3k"],  # PARKSIDE Smart battery
+                [
+                    "ajrhf1aj",
+                    "z5ztlw3k",
+                    "vllfabvs",
+                    "fay1puxy",
+                ],  # PARKSIDE Smart battery
                 [
                     TuyaBLETextMapping(
                         dp_id=106,
@@ -166,7 +172,13 @@ mapping: dict[str, TuyaBLECategoryTextMapping] = {
     "kg": TuyaBLECategoryTextMapping(
         products={
             **dict.fromkeys(
-                ["mknd4lci", "riecov42", "bs3ubslo"],  # Fingerbot Plus
+                [
+                    "mknd4lci",
+                    "riecov42",
+                    "bs3ubslo",
+                    "gnpbj0bq",
+                    "6jcvqwh0",
+                ],  # Fingerbot Plus
                 [
                     TuyaBLETextMapping(
                         dp_id=109,
@@ -202,6 +214,8 @@ def get_mapping_by_device(device: TuyaBLEDevice) -> list[TuyaBLETextMapping]:
 
 class TuyaBLEText(TuyaBLEEntity, TextEntity):
     """Representation of a Tuya BLE text entity."""
+
+    platform = Platform.TEXT
 
     def __init__(
         self,

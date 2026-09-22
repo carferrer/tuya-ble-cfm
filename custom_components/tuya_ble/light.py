@@ -22,6 +22,7 @@ from homeassistant.components.light import (
 )
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -141,7 +142,22 @@ ProductsMapping: dict[str, dict[str, tuple[TuyaLightEntityDescription, ...]]] = 
                 },
             ),
         )
-    }
+    },
+    "jsq": {
+        "if1nolcm": (
+            TuyaLightEntityDescription(
+                key=DPCode.SWITCH_LED,
+                name=None,
+                color_mode=DPCode.WORK_MODE,
+                brightness=(DPCode.BRIGHT_VALUE_V2, DPCode.BRIGHT_VALUE),
+                color_data=(
+                    DPCode.COLOUR_DATA_V2,
+                    DPCode.COLOUR_DATA,
+                    DPCode.COLOUR_DATA_HSV,
+                ),
+            ),
+        )
+    },
 }
 
 # Copied from standard Tuya light component - we could add some default values here too
@@ -247,8 +263,12 @@ LIGHTS: dict[str, tuple[TuyaLightEntityDescription, ...]] = {
             key=DPCode.SWITCH_LED,
             name=None,
             color_mode=DPCode.WORK_MODE,
-            brightness=DPCode.BRIGHT_VALUE,
-            color_data=DPCode.COLOUR_DATA_HSV,
+            brightness=(DPCode.BRIGHT_VALUE_V2, DPCode.BRIGHT_VALUE),
+            color_data=(
+                DPCode.COLOUR_DATA_V2,
+                DPCode.COLOUR_DATA,
+                DPCode.COLOUR_DATA_HSV,
+            ),
         ),
     ),
     # Switch
@@ -520,6 +540,8 @@ def get_mapping_by_device(device: TuyaBLEDevice) -> tuple[TuyaLightEntityDescrip
 class TuyaBLELight(TuyaBLEEntity, LightEntity):
     """Representation of a Tuya BLE Light."""
 
+    platform = Platform.LIGHT
+
     entity_description: TuyaLightEntityDescription
 
     _brightness_max: IntegerTypeData | None = None
@@ -555,18 +577,6 @@ class TuyaBLELight(TuyaBLEEntity, LightEntity):
         self._color_mode_dpcode = self.find_dpcode(
             description.color_mode, prefer_function=True
         )
-
-        if int_type := self.find_dpcode(
-            description.brightness, dptype=DPType.INTEGER, prefer_function=True
-        ):
-            self._brightness = int_type
-            self._attr_supported_color_modes.add(ColorMode.BRIGHTNESS)
-            self._brightness_max = self.find_dpcode(
-                description.brightness_max, dptype=DPType.INTEGER
-            )
-            self._brightness_min = self.find_dpcode(
-                description.brightness_min, dptype=DPType.INTEGER
-            )
 
         if int_type := self.find_dpcode(
             description.color_temp, dptype=DPType.INTEGER, prefer_function=True
@@ -605,6 +615,17 @@ class TuyaBLELight(TuyaBLEEntity, LightEntity):
                     self._brightness and self._brightness.max > 255
                 ):
                     self._color_data_type = DEFAULT_COLOR_TYPE_DATA_V2
+        elif int_type := self.find_dpcode(
+            description.brightness, dptype=DPType.INTEGER, prefer_function=True
+        ):
+            self._brightness = int_type
+            self._attr_supported_color_modes.add(ColorMode.BRIGHTNESS)
+            self._brightness_max = self.find_dpcode(
+                description.brightness_max, dptype=DPType.INTEGER
+            )
+            self._brightness_min = self.find_dpcode(
+                description.brightness_min, dptype=DPType.INTEGER
+            )
 
         if not self._attr_supported_color_modes:
             self._attr_supported_color_modes = {ColorMode.ONOFF}

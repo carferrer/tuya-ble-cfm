@@ -377,14 +377,6 @@
             "flow_velocity": {
                 "name": "Flow rate"
             },
-            "lock_door_status": {
-                "name": "Door status",
-                "state": {
-                    "door_status_unknown": "Unknown",
-                    "door_status_open": "Open",
-                    "door_status_closed": "Closed"
-                }
-            },
             "humidity": {
                 "name": "Humidity"
             },
@@ -488,14 +480,8 @@
             "unlock_ble": {
                 "name": "Last used Bluetooth"
             },
-            "unlock_app": {
-                "name": "Last used App"
-            },
-            "unlock_voice": {
-                "name": "Last used Voice"
-            },
-            "unlock_temp_pwd": {
-                "name": "Last used Temporary Password"
+            "unlock_phone_remote": {
+                "name": "Last used remote phone"
             },
             "key_tone": {
                 "name": "Key tone"
