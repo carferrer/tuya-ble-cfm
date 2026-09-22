@@ -18,6 +18,7 @@ from .tuya_ble import TuyaBLEDevice
 from .cloud import HASSTuyaBLEDeviceManager
 from .const import DOMAIN
 from .devices import TuyaBLECoordinator, TuyaBLEData, get_device_product_info
+from .lock_power_saver import enable_lock_power_saver
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
@@ -48,6 +49,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manager = HASSTuyaBLEDeviceManager(hass, entry.options.copy())
     device = TuyaBLEDevice(manager, ble_device)
     await device.initialize()
+
+    # Battery-powered Tuya locks should not hold a GATT connection open all day.
+    # The wrapper is only enabled for known lock categories (ms/jtmspro) and
+    # reconnects automatically when HA needs to send the next command.
+    enable_lock_power_saver(device)
+
     product_info = get_device_product_info(device)
 
     coordinator = TuyaBLECoordinator(hass, device)
