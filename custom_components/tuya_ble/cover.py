@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from enum import IntEnum
 import logging
+from typing import Any
 
 from homeassistant.components.cover import (
     CoverEntityDescription,
