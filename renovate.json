@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended"],
+  "timezone": "Europe/Madrid",
+  "dependencyDashboard": true,
+  "automerge": false,
+  "enabledManagers": [
+    "github-actions",
+    "homeassistant-manifest"
+  ]
+}
