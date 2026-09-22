@@ -14,9 +14,11 @@ This project is derived from the Tuya BLE integration maintained by the `ha-tuya
 
 Published GitHub releases include `tuya_ble.zip`, which HACS uses for installation and upgrades.
 
-## Current development
+## CFM lock support
 
-The repository is being modernized in stages. CI/HACS packaging is kept separate from functional BLE changes. A later change will move the integration code to the current upstream Tuya BLE base while preserving the lock-specific adaptations used by this fork.
+The current CFM branch is based on Tuya BLE 0.12.1. Battery-powered devices in the `ms` and `jtmspro` lock categories use the upstream native on-demand BLE connection policy by default: Home Assistant connects when an operation is needed and disconnects after the configured idle delay. An explicit `keep_connection` option always takes precedence.
+
+In addition to the lock models already supported upstream, this fork preserves support for the `jtmspro` products `8gza4o8a` and `b3aouluh`, including their tested unlock, volume, motor-state, alarm and battery-state datapoints.
 
 ## Validation
 
