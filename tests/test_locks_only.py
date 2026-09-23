@@ -89,3 +89,15 @@ def test_legacy_transport_is_preserved() -> None:
     assert "FUN_RECEIVE_SIGN_TIME_DP" in transport
     assert 'SERVICE_UUID = "0000fd50-0000-1000-8000-00805f9b34fb"' in transport_const
     assert "SERVICE_CHARACTERISTICS" not in transport_const
+
+
+def test_passive_advertisement_capture_does_not_request_gatt_update() -> None:
+    init = _text("__init__.py")
+    diagnostics = _text("diagnostics.py")
+
+    assert "_cfm_advertisement_history" in init
+    assert "manufacturer_data" in init
+    assert "service_data" in init
+    assert "device._decode_advertisement_data()" in init
+    assert "hass.add_job(device.update())" not in init.split("def _async_update_ble", 1)[1]
+    assert '"advertisement_history"' in diagnostics
