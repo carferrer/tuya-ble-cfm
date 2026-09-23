@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
 import logging
 import time
 
@@ -13,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_ADDRESS, EVENT_HOMEASSISTANT_STOP, Platform
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.event import async_track_time_interval
 
 from .tuya_ble import TuyaBLEDevice
 
@@ -62,13 +64,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Keep the initial update behaviour of the hardware-tested implementation.
     hass.add_job(device.update())
 
-    # Passive diagnostics only. Keep both distinct payloads and the timing of
-    # every advertisement so we can determine whether physical lock activity
-    # creates a burst of advertising without opening a GATT connection.
+    # Passive diagnostics only. Home Assistant deliberately suppresses callback
+    # delivery for byte-for-byte identical advertisements. We therefore keep the
+    # distinct payload history from the callback, and separately sample
+    # async_last_service_info() to observe the timestamp of repeated packets.
+    # This never opens a GATT connection.
     device._cfm_advertisement_history = []
     device._cfm_advertisement_events = []
     device._cfm_last_advertisement_fingerprint = None
-    device._cfm_last_advertisement_timestamp = None
+    device._cfm_last_seen_advertisement_time = None
 
     @callback
     def _async_update_ble(
@@ -78,8 +82,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Refresh BLE device/advertisement information."""
         advertisement = service_info.advertisement
         now = time.time()
-        previous = device._cfm_last_advertisement_timestamp
-        device._cfm_last_advertisement_timestamp = now
 
         service_data = {
             str(uuid): value.hex()
@@ -93,21 +95,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             tuple(service_data.items()),
             tuple(manufacturer_data.items()),
         )
-
-        # Every advertisement is kept for timing analysis. RSSI is diagnostic
-        # only and is never used to decide whether activity occurred.
-        device._cfm_advertisement_events.append(
-            {
-                "timestamp": now,
-                "delta_ms": None if previous is None else round((now - previous) * 1000, 1),
-                "rssi": advertisement.rssi,
-                "payload_changed": (
-                    device._cfm_last_advertisement_fingerprint is not None
-                    and fingerprint != device._cfm_last_advertisement_fingerprint
-                ),
-            }
-        )
-        del device._cfm_advertisement_events[:-200]
 
         if fingerprint != device._cfm_last_advertisement_fingerprint:
             device._cfm_last_advertisement_fingerprint = fingerprint
@@ -140,6 +127,41 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _async_update_ble,
             BluetoothCallbackMatcher({ADDRESS: address}),
             bluetooth.BluetoothScanningMode.ACTIVE,
+        )
+    )
+
+    @callback
+    def _sample_last_advertisement(_now) -> None:
+        """Sample repeated advertisements that HA suppresses from callbacks."""
+        service_info = bluetooth.async_last_service_info(
+            hass, address, connectable=True
+        )
+        if service_info is None:
+            return
+
+        advertisement_time = service_info.time
+        previous = device._cfm_last_seen_advertisement_time
+        if previous == advertisement_time:
+            return
+
+        device._cfm_last_seen_advertisement_time = advertisement_time
+        device._cfm_advertisement_events.append(
+            {
+                "advertisement_time": advertisement_time,
+                "delta_ms": (
+                    None
+                    if previous is None
+                    else round((advertisement_time - previous) * 1000, 1)
+                ),
+            }
+        )
+        del device._cfm_advertisement_events[:-200]
+
+    entry.async_on_unload(
+        async_track_time_interval(
+            hass,
+            _sample_last_advertisement,
+            timedelta(milliseconds=250),
         )
     )
 
