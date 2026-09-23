@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 
 from bleak_retry_connector import get_device
 
@@ -61,15 +62,56 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Keep the initial update behaviour of the hardware-tested implementation.
     hass.add_job(device.update())
 
+    # Diagnostic-only passive advertisement history. Keep only distinct raw
+    # payloads so we can determine whether physical lock activity is encoded in
+    # advertisements without opening a GATT connection or increasing battery use.
+    device._cfm_advertisement_history = []
+    device._cfm_last_advertisement_fingerprint = None
+
     @callback
     def _async_update_ble(
         service_info: bluetooth.BluetoothServiceInfoBleak,
         change: bluetooth.BluetoothChange,
     ) -> None:
         """Refresh BLE device/advertisement information."""
-        device.set_ble_device_and_advertisement_data(
-            service_info.device, service_info.advertisement
+        advertisement = service_info.advertisement
+        service_data = {
+            str(uuid): value.hex()
+            for uuid, value in sorted(advertisement.service_data.items())
+        }
+        manufacturer_data = {
+            f"0x{company_id:04X}": value.hex()
+            for company_id, value in sorted(advertisement.manufacturer_data.items())
+        }
+        fingerprint = (
+            tuple(service_data.items()),
+            tuple(manufacturer_data.items()),
         )
+
+        if fingerprint != device._cfm_last_advertisement_fingerprint:
+            device._cfm_last_advertisement_fingerprint = fingerprint
+            device._cfm_advertisement_history.append(
+                {
+                    "timestamp": time.time(),
+                    "rssi": advertisement.rssi,
+                    "service_data": service_data,
+                    "manufacturer_data": manufacturer_data,
+                }
+            )
+            del device._cfm_advertisement_history[:-30]
+            _LOGGER.debug(
+                "%s: distinct BLE advertisement: service_data=%s manufacturer_data=%s",
+                device.address,
+                service_data,
+                manufacturer_data,
+            )
+
+        device.set_ble_device_and_advertisement_data(
+            service_info.device, advertisement
+        )
+        # Refresh the metadata already understood by the legacy decoder. This is
+        # passive parsing only; it does not connect to the lock.
+        device._decode_advertisement_data()
 
     entry.async_on_unload(
         bluetooth.async_register_callback(
