@@ -44,12 +44,42 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             }
         )
 
+    client = getattr(device, "_client", None)
+    idle_task = getattr(device, "_lock_power_saver_idle_task", None)
+
     return {
         "connected": device.connected,
+        "gatt_connected": bool(client is not None and client.is_connected),
+        "paired": bool(getattr(device, "_is_paired", False)),
         "category": device.category,
         "product_id": device.product_id,
         "rssi": device.rssi,
         "datapoints": datapoints,
+        "power_saver": {
+            "idle_disconnect_delay": getattr(
+                device, "_lock_power_saver_idle_disconnect_delay", None
+            ),
+            "idle_task_pending": bool(idle_task is not None and not idle_task.done()),
+            "idle_disconnecting": bool(
+                getattr(device, "_lock_power_saver_idle_disconnecting", False)
+            ),
+        },
+        "activity_detector": {
+            "armed": bool(getattr(device, "_cfm_activity_armed", False)),
+            "fast_streak": int(getattr(device, "_cfm_activity_fast_streak", 0)),
+            "update_in_progress": bool(
+                getattr(device, "_cfm_activity_update_in_progress", False)
+            ),
+            "trigger_count": int(
+                getattr(device, "_cfm_activity_trigger_count", 0)
+            ),
+            "refresh_count": int(
+                getattr(device, "_cfm_activity_refresh_count", 0)
+            ),
+            "last_trigger_time": getattr(
+                device, "_cfm_last_activity_trigger_time", None
+            ),
+        },
         "advertisement_history": list(
             getattr(device, "_cfm_advertisement_history", [])
         ),
