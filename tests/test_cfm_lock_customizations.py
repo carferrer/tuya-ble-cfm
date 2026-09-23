@@ -12,17 +12,21 @@ def _text(name: str) -> str:
     return (INTEGRATION / name).read_text(encoding="utf-8")
 
 
-def test_cfm_version_and_native_power_saving() -> None:
-    """CFM builds stay based on 0.12.1 and use native on-demand BLE for locks."""
+def test_cfm_version_and_tested_power_saving() -> None:
+    """CFM builds stay on 0.12.1 and use the hardware-tested lock wrapper."""
     manifest = json.loads(_text("manifest.json"))
     init = _text("__init__.py")
     config_flow = _text("config_flow.py")
+    power_saver = _text("lock_power_saver.py")
 
     assert manifest["version"].startswith("0.12.1-cfm.")
-    assert 'not in {"ms", "jtmspro"}' in init
-    assert "_default_keep_connection(entry)" in init
+    assert "enable_lock_power_saver(device, idle_disconnect_delay)" in init
+    assert "_uses_cfm_lock_power_saver(entry)" in init
+    assert "return True" in init  # internal device mode stays persistent for wrapper
     assert 'defaults.get(CONF_CATEGORY) in {"ms", "jtmspro"}' in config_flow
-    assert not (INTEGRATION / "lock_power_saver.py").exists()
+    assert 'LOCK_POWER_SAVER_CATEGORIES = {"ms", "jtmspro"}' in power_saver
+    assert "original_ensure_connected = device._ensure_connected" in power_saver
+    assert "original_fire_disconnected_callbacks" in power_saver
 
 
 def test_cfm_jtmspro_products_are_registered() -> None:
