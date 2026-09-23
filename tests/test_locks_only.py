@@ -76,6 +76,7 @@ def test_proven_power_saver_is_enabled() -> None:
     assert "enable_lock_power_saver(device)" in init
     assert 'LOCK_POWER_SAVER_CATEGORIES = {"ms", "jtmspro"}' in power_saver
     assert "DEFAULT_LOCK_IDLE_DISCONNECT_DELAY = 30" in power_saver
+    assert "def _touch(self: Any, delay: float | None = None)" in power_saver
 
 
 def test_legacy_transport_is_preserved() -> None:
@@ -100,10 +101,16 @@ def test_passive_advertisement_capture_and_activity_refresh() -> None:
     assert "service_data" in init
     assert "device._decode_advertisement_data()" in init
     assert "bluetooth.async_last_service_info" in init
-    assert "CFM_ACTIVITY_QUIET_INTERVAL = 2.5" in init
-    assert "CFM_ACTIVITY_FAST_INTERVAL = 0.9" in init
+    assert "CFM_ACTIVITY_QUIET_INTERVAL = 4.0" in init
+    assert "CFM_ACTIVITY_FAST_INTERVAL = 0.7" in init
     assert "CFM_ACTIVITY_REQUIRED_FAST_INTERVALS = 3" in init
-    assert "await device.update()" in init
+    assert "CFM_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0" in init
+    assert "await device.reconnect()" in init
+    assert init.count("await device.update()") >= 2
+    assert "power_saver_touch(CFM_ACTIVITY_IDLE_DISCONNECT_DELAY)" in init
     assert "activity_triggered" in init
     assert '"advertisement_history"' in diagnostics
     assert '"advertisement_events"' in diagnostics
+    assert '"activity_detector"' in diagnostics
+    assert '"trigger_count"' in diagnostics
+    assert '"gatt_connected"' in diagnostics
