@@ -53,6 +53,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
         "advertisement_history": list(
             getattr(device, "_cfm_advertisement_history", [])
         ),
+        "advertisement_events": list(
+            getattr(device, "_cfm_advertisement_events", [])
+        ),
     }
 
 
