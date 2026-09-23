@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
 import logging
 import time
@@ -32,11 +33,18 @@ PLATFORMS: list[Platform] = [
 
 # Hardware-observed pattern on b3aouluh: while idle, advertisements are usually
 # separated by several seconds; physical activity produces sustained sub-second
-# advertising. Require a quiet period and then three fast intervals to avoid
-# reconnecting on isolated short intervals.
-CFM_ACTIVITY_QUIET_INTERVAL = 2.5
-CFM_ACTIVITY_FAST_INTERVAL = 0.9
+# advertising. Use a stricter pattern than the first experiment to avoid locks
+# reconnecting on normal advertising noise.
+CFM_ACTIVITY_QUIET_INTERVAL = 4.0
+CFM_ACTIVITY_FAST_INTERVAL = 0.7
 CFM_ACTIVITY_REQUIRED_FAST_INTERVALS = 3
+
+# Activity-triggered connections only need to remain up long enough to read the
+# current state and catch the immediate physical-action notifications. Normal HA
+# commands continue to use the 30 s power-saver timeout.
+CFM_ACTIVITY_GATT_SETTLE_DELAY = 0.5
+CFM_ACTIVITY_SECOND_REFRESH_DELAY = 0.75
+CFM_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device._cfm_activity_fast_streak = 0
     device._cfm_activity_update_in_progress = False
     device._cfm_activity_trigger_count = 0
+    device._cfm_activity_refresh_count = 0
     device._cfm_last_activity_trigger_time = None
 
     @callback
@@ -141,14 +150,32 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
 
     async def _refresh_after_activity() -> None:
-        """Open GATT briefly and request current DPs after physical activity."""
+        """Open GATT briefly and reliably request current DPs after activity."""
         device._cfm_activity_update_in_progress = True
         try:
             _LOGGER.debug(
-                "%s: BLE activity burst detected; requesting current lock state",
+                "%s: BLE activity burst detected; reconnecting for lock refresh",
                 device.address,
             )
+
+            # Establish notifications/pairing first, then allow the GATT session
+            # to settle before asking for state. A second status request catches
+            # devices that do not report DP47 on the first request immediately
+            # after reconnecting.
+            await device.reconnect()
+            await asyncio.sleep(CFM_ACTIVITY_GATT_SETTLE_DELAY)
             await device.update()
+            await asyncio.sleep(CFM_ACTIVITY_SECOND_REFRESH_DELAY)
+            await device.update()
+            device._cfm_activity_refresh_count += 1
+
+            # This connection was opened only because of physical activity; keep
+            # it briefly for follow-up notifications, then save battery. If a
+            # normal HA command occurs, its own packet will restore the normal
+            # 30-second idle timer.
+            power_saver_touch = getattr(device, "_lock_power_saver_touch", None)
+            if power_saver_touch is not None:
+                power_saver_touch(CFM_ACTIVITY_IDLE_DISCONNECT_DELAY)
         except Exception:  # noqa: BLE001 - keep scanner callback resilient
             _LOGGER.exception(
                 "%s: Failed to refresh lock state after BLE activity burst",
@@ -177,8 +204,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         if delta is not None:
             if delta >= CFM_ACTIVITY_QUIET_INTERVAL:
-                # A quiet gap means the next sustained fast sequence can be
-                # treated as a new physical-activity burst.
+                # A genuine quiet gap arms the detector. The stricter 4-second
+                # threshold avoids the false reconnects seen with 2.5 seconds.
                 device._cfm_activity_fast_streak = 0
                 if not device.connected and not device._cfm_activity_update_in_progress:
                     device._cfm_activity_armed = True
@@ -204,8 +231,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                         )
             else:
                 # A medium interval breaks a candidate fast sequence but does
-                # not disarm the detector; only a confirmed burst or connection
-                # does that.
+                # not disarm the detector; another fast sequence may still be
+                # part of the same physical activity window.
                 device._cfm_activity_fast_streak = 0
 
         if device.connected:
