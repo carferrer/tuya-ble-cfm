@@ -1,6 +1,11 @@
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.typing import ConfigType
+from __future__ import annotations
+
+from typing import Any
+
 from homeassistant.components.diagnostics import async_redact_data
+from homeassistant.core import HomeAssistant
+
+from .const import DOMAIN
 
 TO_REDACT = {
     "username",
@@ -13,22 +18,54 @@ TO_REDACT = {
 }
 
 
+def _serialize_value(value: Any) -> Any:
+    """Make Tuya datapoint values JSON serializable for diagnostics."""
+    if isinstance(value, bytes):
+        return value.hex()
+    return value
+
+
 async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry):
-    data = {
+    data: dict[str, Any] = {
         "entry": entry.as_dict(),
         "data": entry.data,
         "options": entry.options,
     }
+
+    runtime = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if runtime is not None:
+        device = runtime.device
+        datapoints = []
+        raw_datapoints = getattr(device.datapoints, "_datapoints", {})
+        for dp_id, datapoint in sorted(raw_datapoints.items()):
+            datapoints.append(
+                {
+                    "id": dp_id,
+                    "type": datapoint.type.name,
+                    "value": _serialize_value(datapoint.value),
+                    "timestamp": datapoint.timestamp,
+                }
+            )
+
+        data["runtime"] = {
+            "connected": device.connected,
+            "category": device.category,
+            "product_id": device.product_id,
+            "rssi": device.rssi,
+            "datapoints": datapoints,
+            "advertisement_history": list(
+                getattr(device, "_cfm_advertisement_history", [])
+            ),
+        }
+
     return async_redact_data(data, TO_REDACT)
 
 
 async def async_get_device_diagnostics(hass: HomeAssistant, entry, device):
-    # Optional: if your integration uses devices (via the device registry)
     device_data = {
         "device_name": device.name,
         "identifiers": list(device.identifiers),
         "manufacturer": device.manufacturer,
         "model": device.model,
-        # Add any other relevant device details here
     }
     return async_redact_data(device_data, TO_REDACT)
