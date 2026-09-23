@@ -91,7 +91,7 @@ def test_legacy_transport_is_preserved() -> None:
     assert "SERVICE_CHARACTERISTICS" not in transport_const
 
 
-def test_passive_advertisement_capture_does_not_request_gatt_update() -> None:
+def test_passive_advertisement_capture_and_activity_refresh() -> None:
     init = _text("__init__.py")
     diagnostics = _text("diagnostics.py")
 
@@ -99,5 +99,11 @@ def test_passive_advertisement_capture_does_not_request_gatt_update() -> None:
     assert "manufacturer_data" in init
     assert "service_data" in init
     assert "device._decode_advertisement_data()" in init
-    assert "hass.add_job(device.update())" not in init.split("def _async_update_ble", 1)[1]
+    assert "bluetooth.async_last_service_info" in init
+    assert "CFM_ACTIVITY_QUIET_INTERVAL = 2.5" in init
+    assert "CFM_ACTIVITY_FAST_INTERVAL = 0.9" in init
+    assert "CFM_ACTIVITY_REQUIRED_FAST_INTERVALS = 3" in init
+    assert "await device.update()" in init
+    assert "activity_triggered" in init
     assert '"advertisement_history"' in diagnostics
+    assert '"advertisement_events"' in diagnostics
