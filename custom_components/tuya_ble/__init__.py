@@ -62,11 +62,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Keep the initial update behaviour of the hardware-tested implementation.
     hass.add_job(device.update())
 
-    # Diagnostic-only passive advertisement history. Keep only distinct raw
-    # payloads so we can determine whether physical lock activity is encoded in
-    # advertisements without opening a GATT connection or increasing battery use.
+    # Passive diagnostics only. Keep both distinct payloads and the timing of
+    # every advertisement so we can determine whether physical lock activity
+    # creates a burst of advertising without opening a GATT connection.
     device._cfm_advertisement_history = []
+    device._cfm_advertisement_events = []
     device._cfm_last_advertisement_fingerprint = None
+    device._cfm_last_advertisement_timestamp = None
 
     @callback
     def _async_update_ble(
@@ -75,6 +77,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     ) -> None:
         """Refresh BLE device/advertisement information."""
         advertisement = service_info.advertisement
+        now = time.time()
+        previous = device._cfm_last_advertisement_timestamp
+        device._cfm_last_advertisement_timestamp = now
+
         service_data = {
             str(uuid): value.hex()
             for uuid, value in sorted(advertisement.service_data.items())
@@ -88,11 +94,26 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             tuple(manufacturer_data.items()),
         )
 
+        # Every advertisement is kept for timing analysis. RSSI is diagnostic
+        # only and is never used to decide whether activity occurred.
+        device._cfm_advertisement_events.append(
+            {
+                "timestamp": now,
+                "delta_ms": None if previous is None else round((now - previous) * 1000, 1),
+                "rssi": advertisement.rssi,
+                "payload_changed": (
+                    device._cfm_last_advertisement_fingerprint is not None
+                    and fingerprint != device._cfm_last_advertisement_fingerprint
+                ),
+            }
+        )
+        del device._cfm_advertisement_events[:-200]
+
         if fingerprint != device._cfm_last_advertisement_fingerprint:
             device._cfm_last_advertisement_fingerprint = fingerprint
             device._cfm_advertisement_history.append(
                 {
-                    "timestamp": time.time(),
+                    "timestamp": now,
                     "rssi": advertisement.rssi,
                     "service_data": service_data,
                     "manufacturer_data": manufacturer_data,
