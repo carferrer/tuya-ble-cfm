@@ -47,9 +47,9 @@ def enable_lock_power_saver(
     original_fire_disconnected_callbacks = device._fire_disconnected_callbacks
     original_stop = device.stop
 
-    async def _idle_disconnect(self: Any) -> None:
+    async def _idle_disconnect(self: Any, delay: float) -> None:
         try:
-            await asyncio.sleep(self._lock_power_saver_idle_disconnect_delay)
+            await asyncio.sleep(delay)
 
             while self._operation_lock.locked() or self._input_expected_responses:
                 await asyncio.sleep(0.25)
@@ -60,9 +60,9 @@ def enable_lock_power_saver(
                 return
 
             _LOGGER.debug(
-                "%s: Lock idle for %ss, disconnecting to save battery",
+                "%s: Lock idle for %.1fs, disconnecting to save battery",
                 self.address,
-                self._lock_power_saver_idle_disconnect_delay,
+                delay,
             )
             self._lock_power_saver_idle_disconnecting = True
             try:
@@ -75,13 +75,21 @@ def enable_lock_power_saver(
         except asyncio.CancelledError:
             pass
 
-    def _touch(self: Any) -> None:
+    def _touch(self: Any, delay: float | None = None) -> None:
+        """Restart the idle timer, optionally with a one-off shorter delay."""
         if self._lock_power_saver_stopped:
             return
         task = self._lock_power_saver_idle_task
         if task and not task.done():
             task.cancel()
-        self._lock_power_saver_idle_task = asyncio.create_task(_idle_disconnect(self))
+        effective_delay = (
+            float(self._lock_power_saver_idle_disconnect_delay)
+            if delay is None
+            else max(1.0, float(delay))
+        )
+        self._lock_power_saver_idle_task = asyncio.create_task(
+            _idle_disconnect(self, effective_delay)
+        )
 
     async def _ensure_connected(self: Any) -> None:
         if self._lock_power_saver_stopped:
