@@ -35,6 +35,7 @@ from .const import (
     DOMAIN,
 )
 from .devices import TuyaBLECoordinator, TuyaBLEData, get_device_product_info
+from .lock_power_saver import LOCK_POWER_SAVER_CATEGORIES, enable_lock_power_saver
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
@@ -69,8 +70,38 @@ DISCONNECT_TIMEOUT = 15
 
 
 def _default_keep_connection(entry: ConfigEntry) -> bool:
-    """Default battery-powered locks to native on-demand BLE."""
-    return entry.options.get(CONF_CATEGORY) not in {"ms", "jtmspro"}
+    """Default battery-powered locks to the tested CFM power saver."""
+    return entry.options.get(CONF_CATEGORY) not in LOCK_POWER_SAVER_CATEGORIES
+
+
+def _uses_cfm_lock_power_saver(entry: ConfigEntry) -> bool:
+    """Return whether this entry should use the tested CFM lock policy."""
+    return (
+        entry.options.get(CONF_CATEGORY) in LOCK_POWER_SAVER_CATEGORIES
+        and not entry.options.get(
+            CONF_KEEP_CONNECTION, _default_keep_connection(entry)
+        )
+    )
+
+
+def _device_keep_connection(entry: ConfigEntry) -> bool:
+    """Return the internal TuyaBLEDevice connection mode.
+
+    CFM lock power saving intentionally keeps the 0.12.1 device internals in
+    their normal persistent mode and applies the tested runtime wrapper on top.
+    This preserves the behaviour validated on the physical locks while still
+    dropping the GATT link after the configured idle delay.
+    """
+    if _uses_cfm_lock_power_saver(entry):
+        return True
+    return entry.options.get(CONF_KEEP_CONNECTION, _default_keep_connection(entry))
+
+
+def _configured_keep_connection(device: TuyaBLEDevice) -> bool:
+    """Return the user-visible connection setting for the active device."""
+    if getattr(device, "_lock_power_saver_enabled", False):
+        return False
+    return device.keep_connection
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -85,18 +116,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Could not find Tuya BLE device with address {address}"
         )
 
+    idle_disconnect_delay = entry.options.get(
+        CONF_IDLE_DISCONNECT_DELAY, DEFAULT_IDLE_DISCONNECT_DELAY
+    )
     manager = HASSTuyaBLEDeviceManager(hass, entry.options.copy())
     device = TuyaBLEDevice(
         manager,
         ble_device,
-        keep_connection=entry.options.get(
-            CONF_KEEP_CONNECTION, _default_keep_connection(entry)
-        ),
-        idle_disconnect_delay=entry.options.get(
-            CONF_IDLE_DISCONNECT_DELAY, DEFAULT_IDLE_DISCONNECT_DELAY
-        ),
+        keep_connection=_device_keep_connection(entry),
+        idle_disconnect_delay=idle_disconnect_delay,
     )
     await device.initialize()
+
+    if _uses_cfm_lock_power_saver(entry):
+        enable_lock_power_saver(device, idle_disconnect_delay)
+
     product_info = get_device_product_info(device)
 
     coordinator = TuyaBLECoordinator(hass, device)
@@ -179,7 +213,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
     if (
         entry.options.get(CONF_KEEP_CONNECTION, _default_keep_connection(entry))
-        != data.device.keep_connection
+        != _configured_keep_connection(data.device)
         or entry.options.get(CONF_IDLE_DISCONNECT_DELAY, DEFAULT_IDLE_DISCONNECT_DELAY)
         != data.device.idle_disconnect_delay
         or any(
@@ -194,7 +228,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload Tuya BLE config entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         data: TuyaBLEData = hass.data[DOMAIN].pop(entry.entry_id)
         # stop() -> _execute_disconnect() waits for self._connect_lock, which
