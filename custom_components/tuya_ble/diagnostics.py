@@ -73,6 +73,12 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "trigger_count": int(
                 getattr(device, "_cfm_activity_trigger_count", 0)
             ),
+            "refresh_attempt_count": int(
+                getattr(device, "_cfm_activity_refresh_attempt_count", 0)
+            ),
+            "connect_count": int(
+                getattr(device, "_cfm_activity_connect_count", 0)
+            ),
             "refresh_count": int(
                 getattr(device, "_cfm_activity_refresh_count", 0)
             ),
@@ -82,8 +88,23 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "last_trigger_reason": getattr(
                 device, "_cfm_last_activity_trigger_reason", None
             ),
-            "b3_first_burst_time": getattr(
-                device, "_cfm_b3_first_burst_time", None
+            "last_refresh_started_at": getattr(
+                device, "_cfm_last_refresh_started_at", None
+            ),
+            "last_refresh_connected_at": getattr(
+                device, "_cfm_last_refresh_connected_at", None
+            ),
+            "last_refresh_finished_at": getattr(
+                device, "_cfm_last_refresh_finished_at", None
+            ),
+            "last_refresh_error": getattr(
+                device, "_cfm_last_refresh_error", None
+            ),
+            "last_refresh_dp47_before": getattr(
+                device, "_cfm_last_refresh_dp47_before", None
+            ),
+            "last_refresh_dp47_after": getattr(
+                device, "_cfm_last_refresh_dp47_after", None
             ),
             "payload_activity_pending": bool(
                 getattr(device, "_cfm_payload_activity_pending", False)
