@@ -216,6 +216,9 @@ def test_b3_declared_access_methods_are_exposed_as_persistent_events() -> None:
     assert "ACCESS_STORE_MAX_KEYS = 200" in access
     assert "ACCESS_RECORD_REPLAY_DELAY = 2.0" in access
     assert "access_record_key" in access
+    assert "access_record_value" in access
+    assert '"access_value": access_value' in access
+    assert '"member_id": access_value' in access
     assert '"method": method' in access
     assert '"recovered"' in access
 
@@ -228,6 +231,8 @@ def test_b3_declared_access_methods_are_exposed_as_persistent_events() -> None:
     assert "_attr_event_types = ACCESS_EVENT_TYPES" in event
     assert "self._trigger_event" in event
     assert "Store(" in event
+    assert "deque(maxlen=ACCESS_STORE_MAX_KEYS)" in event
+    assert "popleft()" in event
     assert "seen_keys" in event
     assert "last_record" in event
     assert "establish a baseline" in event
@@ -235,6 +240,8 @@ def test_b3_declared_access_methods_are_exposed_as_persistent_events() -> None:
 
     assert "class TuyaBLELastAccessSensor(SensorEntity)" in sensor
     assert "SensorDeviceClass.TIMESTAMP" in sensor
+    assert "access_record_value" in sensor
+    assert '"access_value"' in sensor
     assert '"member_id"' in sensor
     assert '"recovered"' in sensor
     assert "newest_access_record_from_history" in sensor
