@@ -54,7 +54,9 @@ class TuyaBLEBinarySensor(TuyaBLEEntity, BinarySensorEntity):
         product: TuyaBLEProductInfo,
         mapping: TuyaBLEBinarySensorMapping,
     ) -> None:
-        super().__init__(hass, coordinator, device, product, mapping.description)
+        super().__init__(
+            hass, coordinator, device, product, mapping.description, "binary_sensor"
+        )
         self._mapping = mapping
 
     @callback

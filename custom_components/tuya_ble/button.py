@@ -51,7 +51,9 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
         product: TuyaBLEProductInfo,
         mapping: TuyaBLEButtonMapping,
     ) -> None:
-        super().__init__(hass, coordinator, device, product, mapping.description)
+        super().__init__(
+            hass, coordinator, device, product, mapping.description, "button"
+        )
         self._mapping = mapping
 
     def press(self) -> None:

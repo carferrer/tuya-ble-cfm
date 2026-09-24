@@ -29,6 +29,14 @@ from homeassistant.data_entry_flow import FlowHandler, FlowResult
 
 from .tuya_ble import SERVICE_UUID, TuyaBLEDeviceCredentials
 
+from .connection_policy import (
+    CONF_CONNECTION_MODE,
+    CONF_SYNC_INTERVAL,
+    CONNECTION_MODES,
+    DEFAULT_CONNECTION_MODE,
+    DEFAULT_SYNC_INTERVAL,
+    SYNC_INTERVALS,
+)
 from .const import (
     TUYA_COUNTRIES,
     TUYA_SMART_APP,
@@ -103,6 +111,8 @@ def _show_login_form(
     user_input: dict[str, Any],
     errors: dict[str, str],
     placeholders: dict[str, Any],
+    *,
+    include_connection_options: bool = False,
 ) -> FlowResult:
     """Shows the Tuya IOT platform login form."""
     if user_input is not None and user_input.get(CONF_COUNTRY_CODE) is not None:
@@ -119,32 +129,50 @@ def _show_login_form(
     except:
         pass
 
+    schema: dict[Any, Any] = {
+        vol.Required(
+            CONF_COUNTRY_CODE,
+            default=user_input.get(CONF_COUNTRY_CODE, def_country_name),
+        ): vol.In(
+            [country.name for country in TUYA_COUNTRIES]
+        ),
+        vol.Required(
+            CONF_ACCESS_ID, default=user_input.get(CONF_ACCESS_ID, "")
+        ): str,
+        vol.Required(
+            CONF_ACCESS_SECRET,
+            default=user_input.get(CONF_ACCESS_SECRET, ""),
+        ): str,
+        vol.Required(
+            CONF_USERNAME, default=user_input.get(CONF_USERNAME, "")
+        ): str,
+        vol.Required(
+            CONF_PASSWORD, default=user_input.get(CONF_PASSWORD, "")
+        ): str,
+    }
+
+    if include_connection_options:
+        schema[
+            vol.Required(
+                CONF_CONNECTION_MODE,
+                default=user_input.get(
+                    CONF_CONNECTION_MODE,
+                    DEFAULT_CONNECTION_MODE,
+                ),
+            )
+        ] = vol.In(CONNECTION_MODES)
+        schema[
+            vol.Required(
+                CONF_SYNC_INTERVAL,
+                default=int(
+                    user_input.get(CONF_SYNC_INTERVAL, DEFAULT_SYNC_INTERVAL)
+                ),
+            )
+        ] = vol.In(SYNC_INTERVALS)
+
     return flow.async_show_form(
         step_id="login",
-        data_schema=vol.Schema(
-            {
-                vol.Required(
-                    CONF_COUNTRY_CODE,
-                    default=user_input.get(CONF_COUNTRY_CODE, def_country_name),
-                ): vol.In(
-                    # We don't pass a dict {code:name} because country codes can be duplicate.
-                    [country.name for country in TUYA_COUNTRIES]
-                ),
-                vol.Required(
-                    CONF_ACCESS_ID, default=user_input.get(CONF_ACCESS_ID, "")
-                ): str,
-                vol.Required(
-                    CONF_ACCESS_SECRET,
-                    default=user_input.get(CONF_ACCESS_SECRET, ""),
-                ): str,
-                vol.Required(
-                    CONF_USERNAME, default=user_input.get(CONF_USERNAME, "")
-                ): str,
-                vol.Required(
-                    CONF_PASSWORD, default=user_input.get(CONF_PASSWORD, "")
-                ): str,
-            }
-        ),
+        data_schema=vol.Schema(schema),
         errors=errors,
         description_placeholders=placeholders,
     )
@@ -189,9 +217,20 @@ class TuyaBLEOptionsFlow(OptionsFlowWithConfigEntry):
                         address, True, True
                     )
                     if credentials:
+                        options = dict(entry.manager.data)
+                        options[CONF_CONNECTION_MODE] = user_input.get(
+                            CONF_CONNECTION_MODE,
+                            DEFAULT_CONNECTION_MODE,
+                        )
+                        options[CONF_SYNC_INTERVAL] = int(
+                            user_input.get(
+                                CONF_SYNC_INTERVAL,
+                                DEFAULT_SYNC_INTERVAL,
+                            )
+                        )
                         return self.async_create_entry(
                             title=self.config_entry.title,
-                            data=entry.manager.data,
+                            data=options,
                         )
 
                     errors["base"] = "device_not_registered"
@@ -200,7 +239,13 @@ class TuyaBLEOptionsFlow(OptionsFlowWithConfigEntry):
             user_input = {}
             user_input.update(self.config_entry.options)
 
-        return _show_login_form(self, user_input, errors, placeholders)
+        return _show_login_form(
+            self,
+            user_input,
+            errors,
+            placeholders,
+            include_connection_options=True,
+        )
 
 
 class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
