@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from datetime import UTC, datetime
+from typing import Any, Callable
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
@@ -16,11 +17,24 @@ from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
+from .access import (
+    ACCESS_STORE_VERSION,
+    access_record_from_datapoint,
+    access_store_key,
+    newest_access_record_from_history,
+)
 from .const import DOMAIN
-from .devices import TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
-from .tuya_ble import TuyaBLEDataPointType, TuyaBLEDevice
+from .devices import (
+    PRODUCT_B3AOULUH,
+    TuyaBLEData,
+    TuyaBLEEntity,
+    TuyaBLEProductInfo,
+    get_device_info,
+)
+from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 SIGNAL_STRENGTH_DP_ID = -1
 
@@ -162,6 +176,92 @@ class TuyaBLESensor(TuyaBLEEntity, SensorEntity):
         self.async_write_ha_state()
 
 
+class TuyaBLELastAccessSensor(SensorEntity):
+    """Show when the most recent validated lock access actually occurred."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Last access"
+    _attr_device_class = SensorDeviceClass.TIMESTAMP
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        device: TuyaBLEDevice,
+    ) -> None:
+        self._device = device
+        self._store: Store[dict[str, Any]] = Store(
+            hass,
+            ACCESS_STORE_VERSION,
+            access_store_key(entry.entry_id),
+        )
+        self._ready = False
+        self._queued_records: list[dict[str, Any]] = []
+        self._last_event_timestamp: float | None = None
+        self._attr_unique_id = f"{device.device_id}-last_access"
+        self._attr_device_info = get_device_info(device)
+
+    @callback
+    def _apply_record(self, record: dict[str, Any], *, write_state: bool = True) -> None:
+        """Apply a normalized access record if it is newer than current state."""
+        event_timestamp = float(record["event_timestamp"])
+        if (
+            self._last_event_timestamp is not None
+            and event_timestamp < self._last_event_timestamp
+        ):
+            return
+
+        self._last_event_timestamp = event_timestamp
+        self._attr_native_value = datetime.fromtimestamp(event_timestamp, UTC)
+        self._attr_extra_state_attributes = {
+            "method": record["method"],
+            "member_id": record["member_id"],
+            "dp_id": record["dp_id"],
+            "event_time": record["event_time"],
+            "received_at": record["received_at"],
+            "delay_seconds": record["delay_seconds"],
+            "recovered": record["recovered"],
+        }
+        if write_state:
+            self.async_write_ha_state()
+
+    @callback
+    def _handle_updates(self, updates: list[TuyaBLEDataPoint]) -> None:
+        """Update the timestamp sensor from live or replayed lock records."""
+        for datapoint in updates:
+            record = access_record_from_datapoint(datapoint)
+            if record is None:
+                continue
+            if not self._ready:
+                self._queued_records.append(record)
+                continue
+            self._apply_record(record)
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last access and subscribe to future access records."""
+        await super().async_added_to_hass()
+        self.async_on_remove(self._device.register_callback(self._handle_updates))
+
+        stored = await self._store.async_load()
+        stored_record = None if stored is None else stored.get("last_record")
+        if isinstance(stored_record, dict):
+            self._apply_record(stored_record, write_state=False)
+
+        history_record = newest_access_record_from_history(
+            getattr(self._device, "_cfm_received_dp_events", [])
+        )
+        if history_record is not None:
+            self._apply_record(history_record, write_state=False)
+
+        self._ready = True
+        queued = self._queued_records
+        self._queued_records = []
+        for record in queued:
+            self._apply_record(record, write_state=False)
+
+        self.async_write_ha_state()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -169,7 +269,7 @@ async def async_setup_entry(
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
     mappings = get_mapping_by_device(data.device)
-    entities: list[TuyaBLESensor] = [
+    entities: list[SensorEntity] = [
         TuyaBLESensor(
             hass,
             data.coordinator,
@@ -189,4 +289,6 @@ async def async_setup_entry(
         for item in mappings
         if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)
     )
+    if data.device.product_id == PRODUCT_B3AOULUH:
+        entities.append(TuyaBLELastAccessSensor(hass, entry, data.device))
     async_add_entities(entities)
