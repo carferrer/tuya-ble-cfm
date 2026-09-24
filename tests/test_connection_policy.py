@@ -55,3 +55,17 @@ def test_periodic_sync_and_keep_alive_use_existing_ble_transport() -> None:
     assert '"periodic_sync_attempt_count"' in diagnostics
     assert '"periodic_sync_success_count"' in diagnostics
     assert '"periodic_sync_last_error"' in diagnostics
+
+
+def test_periodic_sync_disables_advertising_activity_reconnects() -> None:
+    policy = _text("connection_policy.py")
+
+    assert "activity_detection_enabled = mode == CONNECTION_MODE_POWER_SAVE" in policy
+    assert "device._cfm_activity_detection_enabled = activity_detection_enabled" in policy
+    assert "device._cfm_activity_armed = False" in policy
+    assert "device._cfm_activity_fast_streak = 0" in policy
+    assert "device._cfm_activity_update_in_progress = not activity_detection_enabled" in policy
+
+    # Periodic mode must not be skipped because the activity detector is
+    # intentionally suppressed by the policy marker above.
+    assert 'getattr(device, "_cfm_activity_update_in_progress", False)' not in policy
