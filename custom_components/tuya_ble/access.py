@@ -10,9 +10,14 @@ from .const import DOMAIN
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType
 
 DP_FINGERPRINT_UNLOCK = 12
+DP_PASSWORD_UNLOCK = 13
 EVENT_FINGERPRINT_UNLOCK = "fingerprint_unlock"
-ACCESS_EVENT_TYPES = [EVENT_FINGERPRINT_UNLOCK]
-ACCESS_RECORD_TYPES = {DP_FINGERPRINT_UNLOCK: EVENT_FINGERPRINT_UNLOCK}
+EVENT_PASSWORD_UNLOCK = "password_unlock"
+ACCESS_RECORD_TYPES = {
+    DP_FINGERPRINT_UNLOCK: (EVENT_FINGERPRINT_UNLOCK, "fingerprint"),
+    DP_PASSWORD_UNLOCK: (EVENT_PASSWORD_UNLOCK, "password"),
+}
+ACCESS_EVENT_TYPES = [event_type for event_type, _method in ACCESS_RECORD_TYPES.values()]
 ACCESS_RECORD_REPLAY_DELAY = 2.0
 ACCESS_STORE_VERSION = 1
 ACCESS_STORE_MAX_KEYS = 200
@@ -30,9 +35,10 @@ def build_access_record(
     received_timestamp: float | None = None,
 ) -> dict[str, Any] | None:
     """Build a normalized access record from a supported Tuya lock datapoint."""
-    event_type = ACCESS_RECORD_TYPES.get(dp_id)
-    if event_type is None:
+    record_type = ACCESS_RECORD_TYPES.get(dp_id)
+    if record_type is None:
         return None
+    event_type, method = record_type
 
     received_timestamp = (
         time.time() if received_timestamp is None else float(received_timestamp)
@@ -42,7 +48,7 @@ def build_access_record(
 
     return {
         "event_type": event_type,
-        "method": "fingerprint",
+        "method": method,
         "dp_id": dp_id,
         "member_id": int(value),
         "event_timestamp": event_timestamp,
