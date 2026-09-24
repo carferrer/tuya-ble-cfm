@@ -181,15 +181,36 @@ def test_b3_dp69_cached_record_recovery_is_local_and_scoped() -> None:
     assert '"dp69_last_error"' in diagnostics
 
 
-def test_b3_fingerprint_and_password_access_are_exposed_as_persistent_events() -> None:
+def test_b3_declared_access_methods_are_exposed_as_persistent_events() -> None:
     access = _text("access.py")
     event = _text("event.py")
     sensor = _text("sensor.py")
 
-    assert "DP_FINGERPRINT_UNLOCK = 12" in access
-    assert "DP_PASSWORD_UNLOCK = 13" in access
-    assert 'EVENT_FINGERPRINT_UNLOCK = "fingerprint_unlock"' in access
-    assert 'EVENT_PASSWORD_UNLOCK = "password_unlock"' in access
+    expected_dp_constants = {
+        "DP_FINGERPRINT_UNLOCK": 12,
+        "DP_PASSWORD_UNLOCK": 13,
+        "DP_DYNAMIC_PASSWORD_UNLOCK": 14,
+        "DP_CARD_UNLOCK": 15,
+        "DP_BLE_UNLOCK": 19,
+        "DP_TEMPORARY_PASSWORD_UNLOCK": 55,
+        "DP_PHONE_REMOTE_UNLOCK": 62,
+        "DP_VOICE_REMOTE_UNLOCK": 63,
+    }
+    for constant, dp_id in expected_dp_constants.items():
+        assert f"{constant} = {dp_id}" in access
+
+    for event_type in (
+        "fingerprint_unlock",
+        "password_unlock",
+        "dynamic_password_unlock",
+        "card_unlock",
+        "ble_unlock",
+        "temporary_password_unlock",
+        "phone_remote_unlock",
+        "voice_remote_unlock",
+    ):
+        assert f'"{event_type}"' in access
+
     assert 'DP_FINGERPRINT_UNLOCK: (EVENT_FINGERPRINT_UNLOCK, "fingerprint")' in access
     assert 'DP_PASSWORD_UNLOCK: (EVENT_PASSWORD_UNLOCK, "password")' in access
     assert "ACCESS_STORE_MAX_KEYS = 200" in access
@@ -198,9 +219,7 @@ def test_b3_fingerprint_and_password_access_are_exposed_as_persistent_events() -
     assert '"method": method' in access
     assert '"recovered"' in access
 
-    # Only fingerprint and password unlock records are enabled for this test.
-    assert "DP_FINGERPRINT_UNLOCK" in access
-    assert "DP_PASSWORD_UNLOCK" in access
+    # Mechanical/inside/lock records are intentionally not inferred as access methods.
     assert "DP_MECHANICAL" not in access
     assert "DP_INSIDE" not in access
     assert "DP_LOCK_RECORD" not in access
