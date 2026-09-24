@@ -11,13 +11,42 @@ from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType
 
 DP_FINGERPRINT_UNLOCK = 12
 DP_PASSWORD_UNLOCK = 13
+DP_DYNAMIC_PASSWORD_UNLOCK = 14
+DP_CARD_UNLOCK = 15
+DP_BLE_UNLOCK = 19
+DP_TEMPORARY_PASSWORD_UNLOCK = 55
+DP_PHONE_REMOTE_UNLOCK = 62
+DP_VOICE_REMOTE_UNLOCK = 63
+
 EVENT_FINGERPRINT_UNLOCK = "fingerprint_unlock"
 EVENT_PASSWORD_UNLOCK = "password_unlock"
+EVENT_DYNAMIC_PASSWORD_UNLOCK = "dynamic_password_unlock"
+EVENT_CARD_UNLOCK = "card_unlock"
+EVENT_BLE_UNLOCK = "ble_unlock"
+EVENT_TEMPORARY_PASSWORD_UNLOCK = "temporary_password_unlock"
+EVENT_PHONE_REMOTE_UNLOCK = "phone_remote_unlock"
+EVENT_VOICE_REMOTE_UNLOCK = "voice_remote_unlock"
+
+# Tuya function definition for b3aouluh declares these unlock records as
+# DT_VALUE datapoints. Fingerprint (DP12) and password (DP13) have been
+# physically validated; the remaining methods use the same normalized path and
+# will only emit when the corresponding datapoint is actually received.
 ACCESS_RECORD_TYPES = {
     DP_FINGERPRINT_UNLOCK: (EVENT_FINGERPRINT_UNLOCK, "fingerprint"),
     DP_PASSWORD_UNLOCK: (EVENT_PASSWORD_UNLOCK, "password"),
+    DP_DYNAMIC_PASSWORD_UNLOCK: (EVENT_DYNAMIC_PASSWORD_UNLOCK, "dynamic_password"),
+    DP_CARD_UNLOCK: (EVENT_CARD_UNLOCK, "card"),
+    DP_BLE_UNLOCK: (EVENT_BLE_UNLOCK, "ble"),
+    DP_TEMPORARY_PASSWORD_UNLOCK: (
+        EVENT_TEMPORARY_PASSWORD_UNLOCK,
+        "temporary_password",
+    ),
+    DP_PHONE_REMOTE_UNLOCK: (EVENT_PHONE_REMOTE_UNLOCK, "phone_remote"),
+    DP_VOICE_REMOTE_UNLOCK: (EVENT_VOICE_REMOTE_UNLOCK, "voice_remote"),
 }
-ACCESS_EVENT_TYPES = [event_type for event_type, _method in ACCESS_RECORD_TYPES.values()]
+ACCESS_EVENT_TYPES = [
+    event_type for event_type, _method in ACCESS_RECORD_TYPES.values()
+]
 ACCESS_RECORD_REPLAY_DELAY = 2.0
 ACCESS_STORE_VERSION = 1
 ACCESS_STORE_MAX_KEYS = 200
@@ -50,6 +79,8 @@ def build_access_record(
         "event_type": event_type,
         "method": method,
         "dp_id": dp_id,
+        # Keep this key for storage/backwards compatibility while the exact
+        # semantics of Tuya's numeric unlock value are still being validated.
         "member_id": int(value),
         "event_timestamp": event_timestamp,
         "event_time": datetime.fromtimestamp(event_timestamp, UTC).isoformat(),
