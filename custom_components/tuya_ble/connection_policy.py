@@ -18,13 +18,15 @@ _LOGGER = logging.getLogger(__name__)
 CONF_CONNECTION_MODE = "connection_mode"
 CONF_SYNC_INTERVAL = "sync_interval_minutes"
 
+CONNECTION_MODE_ON_DEMAND = "on_demand"
 CONNECTION_MODE_POWER_SAVE = "power_save"
 CONNECTION_MODE_PERIODIC_SYNC = "periodic_sync"
 CONNECTION_MODE_KEEP_ALIVE = "keep_alive"
 CONNECTION_MODES = {
-    CONNECTION_MODE_POWER_SAVE: "Battery saver",
-    CONNECTION_MODE_PERIODIC_SYNC: "Battery saver + periodic sync",
-    CONNECTION_MODE_KEEP_ALIVE: "Always connected (keep alive)",
+    CONNECTION_MODE_ON_DEMAND: "Solo bajo demanda — máximo ahorro de batería",
+    CONNECTION_MODE_POWER_SAVE: "Detectar actividad — ahorro de batería",
+    CONNECTION_MODE_PERIODIC_SYNC: "Sincronización periódica — cada X minutos",
+    CONNECTION_MODE_KEEP_ALIVE: "Siempre conectada — Keep Alive",
 }
 
 SYNC_INTERVALS = {
@@ -67,16 +69,15 @@ def apply_connection_mode(device: TuyaBLEDevice, mode: str) -> None:
     """Apply a connection mode to the already-enabled power saver wrapper."""
     device._lock_connection_mode = mode
 
-    # The advertising cadence detector is intentionally only active in the
-    # pure battery-saver mode. In periodic-sync mode the configured interval is
-    # authoritative; otherwise idle b3 advertising bursts can create extra
-    # reconnects between scheduled synchronizations. Keep-alive has its own
-    # reconnect watchdog and also does not need the advertising detector.
+    # Advertising-triggered GATT reconnects belong exclusively to the
+    # activity-detection mode. Periodic sync, keep-alive and on-demand all have
+    # their own explicit connection policy and must ignore advertising bursts.
     activity_detection_enabled = mode == CONNECTION_MODE_POWER_SAVE
     device._cfm_activity_detection_enabled = activity_detection_enabled
     device._cfm_activity_armed = False
     device._cfm_activity_fast_streak = 0
-    device._cfm_activity_update_in_progress = not activity_detection_enabled
+    device._cfm_activity_update_in_progress = False
+    device._cfm_payload_activity_pending = False
 
     idle_task = getattr(device, "_lock_power_saver_idle_task", None)
     if mode == CONNECTION_MODE_KEEP_ALIVE and idle_task and not idle_task.done():
@@ -130,8 +131,18 @@ def setup_connection_policy(
             timedelta(seconds=KEEP_ALIVE_WATCHDOG_SECONDS),
         )
 
-    if mode != CONNECTION_MODE_PERIODIC_SYNC:
-        _LOGGER.info("%s: BLE connection mode is battery saver", device.address)
+    if mode == CONNECTION_MODE_ON_DEMAND:
+        _LOGGER.info(
+            "%s: BLE connection mode is on-demand only; advertising reconnects disabled",
+            device.address,
+        )
+        return None
+
+    if mode == CONNECTION_MODE_POWER_SAVE:
+        _LOGGER.info(
+            "%s: BLE connection mode is activity-detection battery saver",
+            device.address,
+        )
         return None
 
     interval = sync_interval_minutes(entry)
