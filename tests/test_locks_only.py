@@ -136,3 +136,15 @@ def test_product_specific_activity_detection() -> None:
     assert '"refresh_history"' in diagnostics
     assert '"payload_change_count"' in diagnostics
     assert '"gatt_connected"' in diagnostics
+
+
+def test_received_local_datapoints_are_exposed_for_lock_record_analysis() -> None:
+    devices = _text("devices.py")
+    diagnostics = _text("diagnostics.py")
+
+    assert "_cfm_received_dp_events" in devices
+    assert '"received_at"' in devices
+    assert '"datapoints"' in devices
+    assert '"flags"' in devices
+    assert '"timestamp"' in devices
+    assert '"received_dp_events"' in diagnostics
