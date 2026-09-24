@@ -16,7 +16,6 @@ def test_only_supported_lock_products_are_registered() -> None:
     assert '"okkyfgfs"' in devices
     assert '"b3aouluh"' in devices
 
-    # Representative products from the old generic integration must not return.
     for product_id in (
         "8gza4o8a",
         "ludzroix",
@@ -83,8 +82,6 @@ def test_legacy_transport_is_preserved() -> None:
     transport = _text("tuya_ble/tuya_ble.py")
     transport_const = _text("tuya_ble/const.py")
 
-    # Markers from the hardware-tested transport. Do not silently replace this
-    # with the newer 0.12.x transport before a dedicated hardware validation.
     assert "attempts_count = 100" in transport
     assert "_parse_datapoints_v3" in transport
     assert "FUN_RECEIVE_SIGN_TIME_DP" in transport
@@ -92,25 +89,40 @@ def test_legacy_transport_is_preserved() -> None:
     assert "SERVICE_CHARACTERISTICS" not in transport_const
 
 
-def test_passive_advertisement_capture_and_activity_refresh() -> None:
+def test_product_specific_activity_detection() -> None:
     init = _text("__init__.py")
     diagnostics = _text("diagnostics.py")
 
-    assert "_cfm_advertisement_history" in init
-    assert "manufacturer_data" in init
-    assert "service_data" in init
-    assert "device._decode_advertisement_data()" in init
+    assert 'PRODUCT_B3AOULUH = "b3aouluh"' in init
+    assert 'PRODUCT_OKKYFGFS = "okkyfgfs"' in init
+
+    assert "B3_ACTIVITY_QUIET_INTERVAL = 4.0" in init
+    assert "B3_ACTIVITY_FAST_INTERVAL = 0.7" in init
+    assert "B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3" in init
+    assert "B3_ACTIVITY_SECOND_BURST_WINDOW = 8.0" in init
+    assert '"double_burst"' in init
+
+    assert "OKKY_ACTIVITY_QUIET_INTERVAL = 15.0" in init
+    assert "OKKY_ACTIVITY_FAST_INTERVAL = 0.7" in init
+    assert "OKKY_ACTIVITY_REQUIRED_FAST_INTERVALS = 2" in init
+    assert '"payload_change"' in init
+    assert '"sparse_burst"' in init
+
     assert "bluetooth.async_last_service_info" in init
-    assert "CFM_ACTIVITY_QUIET_INTERVAL = 4.0" in init
-    assert "CFM_ACTIVITY_FAST_INTERVAL = 0.7" in init
-    assert "CFM_ACTIVITY_REQUIRED_FAST_INTERVALS = 3" in init
+    assert "device._decode_advertisement_data()" in init
     assert "CFM_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0" in init
     assert "await device.reconnect()" in init
     assert init.count("await device.update()") >= 2
     assert "power_saver_touch(CFM_ACTIVITY_IDLE_DISCONNECT_DELAY)" in init
-    assert "activity_triggered" in init
-    assert '"advertisement_history"' in diagnostics
-    assert '"advertisement_events"' in diagnostics
+
+    assert '"observed_at"' in init
+    assert '"trigger_reason"' in init
+    assert '"burst_candidate_pending"' in init
+    assert '"gatt_connected"' in init
+
     assert '"activity_detector"' in diagnostics
     assert '"trigger_count"' in diagnostics
+    assert '"last_trigger_reason"' in diagnostics
+    assert '"b3_first_burst_time"' in diagnostics
+    assert '"payload_change_count"' in diagnostics
     assert '"gatt_connected"' in diagnostics
