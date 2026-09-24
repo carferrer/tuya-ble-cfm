@@ -87,6 +87,28 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
                 getattr(device, "_lock_power_saver_idle_disconnecting", False)
             ),
         },
+        "connection_policy": {
+            "mode": getattr(
+                device,
+                "_cfm_connection_mode",
+                getattr(device, "_lock_connection_mode", None),
+            ),
+            "sync_interval_minutes": getattr(
+                device, "_cfm_periodic_sync_interval_minutes", None
+            ),
+            "periodic_sync_attempt_count": int(
+                getattr(device, "_cfm_periodic_sync_attempt_count", 0)
+            ),
+            "periodic_sync_success_count": int(
+                getattr(device, "_cfm_periodic_sync_success_count", 0)
+            ),
+            "periodic_sync_last_started_at": getattr(
+                device, "_cfm_periodic_sync_last_started_at", None
+            ),
+            "periodic_sync_last_error": getattr(
+                device, "_cfm_periodic_sync_last_error", None
+            ),
+        },
         "activity_detector": {
             "armed": bool(getattr(device, "_cfm_activity_armed", False)),
             "fast_streak": int(getattr(device, "_cfm_activity_fast_streak", 0)),
