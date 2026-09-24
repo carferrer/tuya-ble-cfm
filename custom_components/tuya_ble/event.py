@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from typing import Any
 
 from homeassistant.components.event import EventEntity
@@ -44,7 +45,7 @@ class TuyaBLEAccessEvent(EventEntity):
             ACCESS_STORE_VERSION,
             access_store_key(entry.entry_id),
         )
-        self._seen_keys: list[str] = []
+        self._seen_keys: deque[str] = deque(maxlen=ACCESS_STORE_MAX_KEYS)
         self._seen_set: set[str] = set()
         self._last_record: dict[str, Any] | None = None
         self._ready = False
@@ -67,11 +68,11 @@ class TuyaBLEAccessEvent(EventEntity):
         if key in self._seen_set:
             return False
 
+        if len(self._seen_keys) == ACCESS_STORE_MAX_KEYS:
+            removed = self._seen_keys.popleft()
+            self._seen_set.discard(removed)
         self._seen_keys.append(key)
         self._seen_set.add(key)
-        while len(self._seen_keys) > ACCESS_STORE_MAX_KEYS:
-            removed = self._seen_keys.pop(0)
-            self._seen_set.discard(removed)
 
         if (
             self._last_record is None
@@ -134,9 +135,10 @@ class TuyaBLEAccessEvent(EventEntity):
             await self._store.async_save(self._storage_payload())
         else:
             raw_keys = stored.get("seen_keys", [])
-            self._seen_keys = [key for key in raw_keys if isinstance(key, str)][
-                -ACCESS_STORE_MAX_KEYS:
-            ]
+            self._seen_keys = deque(
+                (key for key in raw_keys if isinstance(key, str)),
+                maxlen=ACCESS_STORE_MAX_KEYS,
+            )
             self._seen_set = set(self._seen_keys)
             stored_last = stored.get("last_record")
             if isinstance(stored_last, dict):
