@@ -73,15 +73,18 @@ def build_access_record(
         time.time() if received_timestamp is None else float(received_timestamp)
     )
     event_timestamp = float(event_timestamp)
+    access_value = int(value)
     delay_seconds = max(0.0, received_timestamp - event_timestamp)
 
     return {
         "event_type": event_type,
         "method": method,
         "dp_id": dp_id,
-        # Keep the existing member_id key for storage/API compatibility while
-        # the exact semantics of Tuya's numeric unlock value remain uncertain.
-        "member_id": int(value),
+        # Tuya exposes an integer for these access records, but its exact
+        # semantics vary by method and are not proven yet. Expose a neutral
+        # access_value while retaining member_id as a backwards-compatible alias.
+        "access_value": access_value,
+        "member_id": access_value,
         "event_timestamp": event_timestamp,
         "event_time": datetime.fromtimestamp(event_timestamp, UTC).isoformat(),
         "received_timestamp": received_timestamp,
@@ -111,12 +114,19 @@ def access_record_from_datapoint(
     )
 
 
+def access_record_value(record: dict[str, Any]) -> int:
+    """Return the neutral Tuya access value with legacy-store compatibility."""
+    if "access_value" in record:
+        return int(record["access_value"])
+    return int(record["member_id"])
+
+
 def access_record_key(record: dict[str, Any]) -> str:
     """Return a stable key used to suppress replayed access records."""
     return (
         f"{record['dp_id']}:"
         f"{float(record['event_timestamp']):.3f}:"
-        f"{record['member_id']}"
+        f"{access_record_value(record)}"
     )
 
 
