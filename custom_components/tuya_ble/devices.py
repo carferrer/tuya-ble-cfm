@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import logging
+import time
 
 from homeassistant.core import CALLBACK_TYPE, HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
@@ -79,6 +80,7 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         self._device = device
         self._disconnected = True
         self._unsub_disconnect: CALLBACK_TYPE | None = None
+        self._device._cfm_received_dp_events = []
         device.register_connected_callback(self._async_handle_connect)
         device.register_callback(self._async_handle_update)
         device.register_disconnected_callback(self._async_handle_disconnect)
@@ -97,7 +99,28 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
 
     @callback
     def _async_handle_update(self, updates: list[TuyaBLEDataPoint]) -> None:
-        """Propagate a BLE datapoint update to Home Assistant entities."""
+        """Capture and propagate BLE datapoint updates to Home Assistant."""
+        received_event = {
+            "received_at": time.time(),
+            "gatt_connected": self._device.connected,
+            "datapoints": [
+                {
+                    "id": datapoint.id,
+                    "type": datapoint.type.name,
+                    "value": (
+                        datapoint.value.hex()
+                        if isinstance(datapoint.value, bytes)
+                        else datapoint.value
+                    ),
+                    "timestamp": datapoint.timestamp,
+                    "flags": datapoint.flags,
+                }
+                for datapoint in updates
+            ],
+        }
+        self._device._cfm_received_dp_events.append(received_event)
+        del self._device._cfm_received_dp_events[:-100]
+
         self._async_handle_connect()
         self.async_set_updated_data(None)
 
