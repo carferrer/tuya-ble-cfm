@@ -34,12 +34,14 @@ PLATFORMS: list[Platform] = [
 PRODUCT_B3AOULUH = "b3aouluh"
 PRODUCT_OKKYFGFS = "okkyfgfs"
 
-# Hardware validation shows that a real b3aouluh physical action may produce
-# only one complete fast burst. Waiting for a second burst loses the event, so
-# reconnect on the first confirmed three-interval burst.
+# Hardware validation shows that some real b3aouluh physical actions only
+# provide two consecutive fast intervals before the event is effectively lost.
+# Idle advertising can produce the same cadence, so wake early but keep these
+# speculative GATT connections very short to limit battery cost.
 B3_ACTIVITY_QUIET_INTERVAL = 4.0
 B3_ACTIVITY_FAST_INTERVAL = 0.7
-B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3
+B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 2
+B3_ACTIVITY_IDLE_DISCONNECT_DELAY = 3.0
 
 # okkyfgfs advertises sparsely and often loses packets at the observed signal
 # level. After a quiet period, reconnect on the first fast interval so GATT is
@@ -47,13 +49,12 @@ B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3
 OKKY_ACTIVITY_QUIET_INTERVAL = 15.0
 OKKY_ACTIVITY_FAST_INTERVAL = 0.7
 OKKY_ACTIVITY_REQUIRED_FAST_INTERVALS = 1
+OKKY_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0
 
-# Activity-triggered connections only need to remain up long enough to read the
-# current state and catch immediate physical-action notifications. Normal HA
-# commands continue to use the 30 s power-saver timeout.
+# Notifications/pairing are established by reconnect(). Keep the refresh delays
+# short so event-like DP47 data is requested while the physical event is active.
 CFM_ACTIVITY_GATT_SETTLE_DELAY = 0.1
 CFM_ACTIVITY_SECOND_REFRESH_DELAY = 0.5
-CFM_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -107,21 +108,38 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device._cfm_last_refresh_error = None
     device._cfm_last_refresh_dp47_before = None
     device._cfm_last_refresh_dp47_after = None
+    device._cfm_activity_refresh_history = []
 
-    async def _refresh_after_activity(reason: str) -> None:
-        """Open GATT quickly and request current DPs after physical activity."""
+    async def _refresh_after_activity(
+        reason: str, advertisement_time: float
+    ) -> None:
+        """Open GATT quickly and request current DPs after suspected activity."""
         device._cfm_activity_refresh_attempt_count += 1
-        device._cfm_last_refresh_started_at = time.time()
+        started_at = time.time()
+        device._cfm_last_refresh_started_at = started_at
         device._cfm_last_refresh_connected_at = None
         device._cfm_last_refresh_finished_at = None
         device._cfm_last_refresh_error = None
 
         dp47 = device.datapoints[47]
-        device._cfm_last_refresh_dp47_before = (
+        dp47_before = (
             None
             if dp47 is None
             else {"value": dp47.value, "timestamp": dp47.timestamp}
         )
+        device._cfm_last_refresh_dp47_before = dp47_before
+
+        refresh_record = {
+            "reason": reason,
+            "advertisement_time": advertisement_time,
+            "started_at": started_at,
+            "connected_at": None,
+            "finished_at": None,
+            "duration_ms": None,
+            "dp47_before": dp47_before,
+            "dp47_after": None,
+            "error": None,
+        }
 
         try:
             _LOGGER.debug(
@@ -133,15 +151,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             await device.reconnect()
             if device.connected:
                 device._cfm_activity_connect_count += 1
-                device._cfm_last_refresh_connected_at = time.time()
+                connected_at = time.time()
+                device._cfm_last_refresh_connected_at = connected_at
+                refresh_record["connected_at"] = connected_at
             else:
                 _LOGGER.warning(
                     "%s: Activity refresh reconnect returned without paired GATT",
                     device.address,
                 )
 
-            # Notifications/pairing are already established by reconnect(). Keep
-            # this delay deliberately short so event-like DP47 data is not lost.
             await asyncio.sleep(CFM_ACTIVITY_GATT_SETTLE_DELAY)
             await device.update()
             await asyncio.sleep(CFM_ACTIVITY_SECOND_REFRESH_DELAY)
@@ -149,24 +167,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             device._cfm_activity_refresh_count += 1
 
             dp47 = device.datapoints[47]
-            device._cfm_last_refresh_dp47_after = (
+            dp47_after = (
                 None
                 if dp47 is None
                 else {"value": dp47.value, "timestamp": dp47.timestamp}
             )
+            device._cfm_last_refresh_dp47_after = dp47_after
+            refresh_record["dp47_after"] = dp47_after
 
             power_saver_touch = getattr(device, "_lock_power_saver_touch", None)
             if power_saver_touch is not None:
-                power_saver_touch(CFM_ACTIVITY_IDLE_DISCONNECT_DELAY)
+                idle_delay = (
+                    B3_ACTIVITY_IDLE_DISCONNECT_DELAY
+                    if device.product_id == PRODUCT_B3AOULUH
+                    else OKKY_ACTIVITY_IDLE_DISCONNECT_DELAY
+                )
+                power_saver_touch(idle_delay)
         except Exception as err:  # noqa: BLE001 - keep scanner callback resilient
-            device._cfm_last_refresh_error = f"{type(err).__name__}: {err}"
+            error = f"{type(err).__name__}: {err}"
+            device._cfm_last_refresh_error = error
+            refresh_record["error"] = error
             _LOGGER.exception(
                 "%s: Failed to refresh lock state after BLE activity (%s)",
                 device.address,
                 reason,
             )
         finally:
-            device._cfm_last_refresh_finished_at = time.time()
+            finished_at = time.time()
+            device._cfm_last_refresh_finished_at = finished_at
+            refresh_record["finished_at"] = finished_at
+            refresh_record["duration_ms"] = round(
+                (finished_at - started_at) * 1000, 1
+            )
+            device._cfm_activity_refresh_history.append(refresh_record)
+            del device._cfm_activity_refresh_history[:-30]
             device._cfm_activity_update_in_progress = False
 
     @callback
@@ -182,7 +216,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device._cfm_last_activity_trigger_time = advertisement_time
         device._cfm_last_activity_trigger_reason = reason
         hass.async_create_task(
-            _refresh_after_activity(reason),
+            _refresh_after_activity(reason, advertisement_time),
             f"Tuya BLE CFM lock activity refresh ({reason})",
         )
         return True
@@ -367,7 +401,7 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Unload a config entry."""
+    """Unload Tuya BLE entry."""
     if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
         data: TuyaBLEData = hass.data[DOMAIN].pop(entry.entry_id)
         await data.device.stop()
