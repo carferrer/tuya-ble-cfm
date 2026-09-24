@@ -39,9 +39,12 @@ def test_periodic_sync_and_keep_alive_use_existing_ble_transport() -> None:
     assert "setup_connection_policy(hass, entry, data.device)" in event
     assert "async_track_time_interval" in policy
     assert "await device.reconnect()" in policy
-    assert policy.count("await device.update()") >= 2
+    assert policy.count("await device.update()") >= 3
     assert "if device.connected:" in policy
-    assert 'touch(3.0)' in policy
+    assert "touch(5.0)" in policy
+    assert "KEEP_ALIVE_WATCHDOG_SECONDS = 30" in policy
+    assert "_cfm_keep_alive_attempt_count" in policy
+    assert "_cfm_keep_alive_success_count" in policy
 
     assert 'KEEP_ALIVE_MODE = "keep_alive"' in power_saver
     assert "self._lock_connection_mode == KEEP_ALIVE_MODE" in power_saver
