@@ -52,6 +52,7 @@ def test_periodic_sync_and_keep_alive_use_existing_ble_transport() -> None:
 
     assert '"connection_policy"' in diagnostics
     assert '"sync_interval_minutes"' in diagnostics
+    assert '"activity_detection_enabled"' in diagnostics
     assert '"periodic_sync_attempt_count"' in diagnostics
     assert '"periodic_sync_success_count"' in diagnostics
     assert '"periodic_sync_last_error"' in diagnostics
