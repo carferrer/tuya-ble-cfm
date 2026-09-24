@@ -23,6 +23,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .access import (
     ACCESS_STORE_VERSION,
     access_record_from_datapoint,
+    access_record_value,
     access_store_key,
     newest_access_record_from_history,
 )
@@ -211,11 +212,14 @@ class TuyaBLELastAccessSensor(SensorEntity):
         ):
             return
 
+        access_value = access_record_value(record)
         self._last_event_timestamp = event_timestamp
         self._attr_native_value = datetime.fromtimestamp(event_timestamp, UTC)
         self._attr_extra_state_attributes = {
             "method": record["method"],
-            "member_id": record["member_id"],
+            "access_value": access_value,
+            # Legacy alias retained so existing automations do not break.
+            "member_id": int(record.get("member_id", access_value)),
             "dp_id": record["dp_id"],
             "event_time": record["event_time"],
             "received_at": record["received_at"],
