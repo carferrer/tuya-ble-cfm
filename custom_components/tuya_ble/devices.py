@@ -25,6 +25,12 @@ from .tuya_ble import (
 
 _LOGGER = logging.getLogger(__name__)
 
+PRODUCT_B3AOULUH = "b3aouluh"
+DP_GET_RECORDS = 69
+DP_GET_RECORDS_REQUEST_ACTION = 0x01
+MOBILE_CENTRAL_ID = b"\xff\xff"
+INITIAL_MOBILE_RANDOM = bytes(8)
+
 
 @dataclass
 class TuyaBLEProductInfo:
@@ -80,7 +86,14 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         self._device = device
         self._disconnected = True
         self._unsub_disconnect: CALLBACK_TYPE | None = None
+        self._dp69_response_client = None
         self._device._cfm_received_dp_events = []
+        self._device._cfm_dp69_request_count = 0
+        self._device._cfm_dp69_response_attempt_count = 0
+        self._device._cfm_dp69_response_count = 0
+        self._device._cfm_dp69_last_request = None
+        self._device._cfm_dp69_last_response = None
+        self._device._cfm_dp69_last_error = None
         device.register_connected_callback(self._async_handle_connect)
         device.register_callback(self._async_handle_update)
         device.register_disconnected_callback(self._async_handle_disconnect)
@@ -96,6 +109,44 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         if self._disconnected:
             self._disconnected = False
             self.async_update_listeners()
+
+    async def _async_reply_dp69_cached_records(
+        self,
+        datapoint: TuyaBLEDataPoint,
+        request_value: bytes,
+        client,
+    ) -> None:
+        """Tell a b3 lock to report cached records after a DP69 request."""
+        peripheral_id = request_value[:2]
+        response = (
+            MOBILE_CENTRAL_ID
+            + peripheral_id
+            + INITIAL_MOBILE_RANDOM
+            + b"\x00"
+        )
+        self._device._cfm_dp69_response_attempt_count += 1
+        self._device._cfm_dp69_last_response = response.hex()
+        self._device._cfm_dp69_last_error = None
+
+        try:
+            _LOGGER.debug(
+                "%s: DP69 cached-record request %s; replying %s",
+                self._device.address,
+                request_value.hex(),
+                response.hex(),
+            )
+            await datapoint.set_value(response)
+        except Exception as err:  # noqa: BLE001 - diagnostic experiment
+            # Permit one retry if the same GATT session reports DP69 again.
+            if self._dp69_response_client is client:
+                self._dp69_response_client = None
+            self._device._cfm_dp69_last_error = f"{type(err).__name__}: {err}"
+            _LOGGER.exception(
+                "%s: Failed to reply to DP69 cached-record request",
+                self._device.address,
+            )
+        else:
+            self._device._cfm_dp69_response_count += 1
 
     @callback
     def _async_handle_update(self, updates: list[TuyaBLEDataPoint]) -> None:
@@ -120,6 +171,40 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         }
         self._device._cfm_received_dp_events.append(received_event)
         del self._device._cfm_received_dp_events[:-100]
+
+        if self._device.product_id == PRODUCT_B3AOULUH:
+            for datapoint in updates:
+                value = datapoint.value
+                if not (
+                    datapoint.id == DP_GET_RECORDS
+                    and datapoint.type.name == "DT_RAW"
+                    and isinstance(value, bytes)
+                    and len(value) == 3
+                    and value[2] == DP_GET_RECORDS_REQUEST_ACTION
+                ):
+                    continue
+
+                self._device._cfm_dp69_request_count += 1
+                self._device._cfm_dp69_last_request = value.hex()
+
+                client = getattr(self._device, "_client", None)
+                if (
+                    client is not None
+                    and client.is_connected
+                    and self._dp69_response_client is not client
+                ):
+                    # Reply at most once per real GATT session. Idle disconnects
+                    # suppress coordinator disconnect callbacks, so client object
+                    # identity is more reliable than a boolean reset flag here.
+                    self._dp69_response_client = client
+                    self.hass.async_create_task(
+                        self._async_reply_dp69_cached_records(
+                            datapoint,
+                            bytes(value),
+                            client,
+                        ),
+                        "Tuya BLE CFM DP69 cached-record response",
+                    )
 
         self._async_handle_connect()
         self.async_set_updated_data(None)
@@ -210,7 +295,7 @@ async def get_device_readable_name(
 
 
 def get_device_info(device: TuyaBLEDevice) -> DeviceInfo:
-    product_info = get_product_info_by_ids(device.category, device.product_id)
+    product_info = get_device_product_info(device)
     product_name = product_info.name if product_info else device.name
     return DeviceInfo(
         connections={(dr.CONNECTION_BLUETOOTH, device.address)},
