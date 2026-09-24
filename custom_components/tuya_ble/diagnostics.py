@@ -108,6 +108,15 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "periodic_sync_last_error": getattr(
                 device, "_cfm_periodic_sync_last_error", None
             ),
+            "keep_alive_attempt_count": int(
+                getattr(device, "_cfm_keep_alive_attempt_count", 0)
+            ),
+            "keep_alive_success_count": int(
+                getattr(device, "_cfm_keep_alive_success_count", 0)
+            ),
+            "keep_alive_last_error": getattr(
+                device, "_cfm_keep_alive_last_error", None
+            ),
         },
         "activity_detector": {
             "armed": bool(getattr(device, "_cfm_activity_armed", False)),
