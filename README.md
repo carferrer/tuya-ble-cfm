@@ -51,3 +51,20 @@ Derived from the `ha-tuya-ble/ha_tuya_ble` project and its contributors.
 ## License
 
 MIT License. See [LICENSE](LICENSE).
+
+## Entity IDs and BLE recovery
+
+Entity constructors now suggest IDs in their own platform domain (`button`,
+`binary_sensor`, `select`, or `sensor`). Existing `unique_id` values are unchanged.
+Home Assistant already registers unique-ID entities under their platform domain,
+even when an integration suggests a different prefix. It reuses the registered
+ID (including custom names and collision suffixes) on reload. No registry entries
+are deleted or renamed, and automation references do not need migration. The
+previous `sensor.*` suggestions were the source of the domain deprecation warning,
+not evidence that buttons were registered as sensors.
+
+The BLE receiver discards malformed or incomplete frames and resumes at the next
+start fragment. Recoverable ordering interruptions are logged at debug level;
+invalid lengths, CRCs and payloads are warnings. Valid fragmented frames still
+reassemble normally. DP69 handshake, access timestamps, event mappings and
+persistent deduplication remain unchanged.

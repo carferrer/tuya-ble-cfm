@@ -56,7 +56,9 @@ class TuyaBLESelect(TuyaBLEEntity, SelectEntity):
         product: TuyaBLEProductInfo,
         mapping: TuyaBLESelectMapping,
     ) -> None:
-        super().__init__(hass, coordinator, device, product, mapping.description)
+        super().__init__(
+            hass, coordinator, device, product, mapping.description, "select"
+        )
         self._mapping = mapping
         self._attr_options = mapping.description.options
 
