@@ -19,6 +19,7 @@ from .access import (
     access_store_key,
     iter_access_records_from_history,
 )
+from .connection_policy import setup_connection_policy
 from .const import DOMAIN
 from .devices import PRODUCT_B3AOULUH, TuyaBLEData, get_device_info
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDevice
@@ -153,13 +154,26 @@ class TuyaBLEAccessEvent(EventEntity):
             self._process_record(record)
 
 
+async def _async_connection_options_updated(
+    hass: HomeAssistant, entry: ConfigEntry
+) -> None:
+    """Reload the device when its BLE connection policy changes."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up access event entities for validated b3 locks."""
+    """Set up connection policy and access event entities."""
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
+
+    unsubscribe = setup_connection_policy(hass, entry, data.device)
+    if unsubscribe is not None:
+        entry.async_on_unload(unsubscribe)
+    entry.async_on_unload(entry.add_update_listener(_async_connection_options_updated))
+
     if data.device.product_id != PRODUCT_B3AOULUH:
         return
 
