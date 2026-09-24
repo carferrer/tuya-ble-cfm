@@ -76,7 +76,7 @@ def apply_connection_mode(device: TuyaBLEDevice, mode: str) -> None:
     device._cfm_activity_detection_enabled = activity_detection_enabled
     device._cfm_activity_armed = False
     device._cfm_activity_fast_streak = 0
-    device._cfm_activity_update_in_progress = False
+    device._cfm_activity_update_in_progress = not activity_detection_enabled
     device._cfm_payload_activity_pending = False
 
     idle_task = getattr(device, "_lock_power_saver_idle_task", None)
