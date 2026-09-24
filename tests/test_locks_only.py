@@ -181,21 +181,26 @@ def test_b3_dp69_cached_record_recovery_is_local_and_scoped() -> None:
     assert '"dp69_last_error"' in diagnostics
 
 
-def test_b3_fingerprint_access_is_exposed_as_persistent_event() -> None:
+def test_b3_fingerprint_and_password_access_are_exposed_as_persistent_events() -> None:
     access = _text("access.py")
     event = _text("event.py")
     sensor = _text("sensor.py")
 
     assert "DP_FINGERPRINT_UNLOCK = 12" in access
+    assert "DP_PASSWORD_UNLOCK = 13" in access
     assert 'EVENT_FINGERPRINT_UNLOCK = "fingerprint_unlock"' in access
+    assert 'EVENT_PASSWORD_UNLOCK = "password_unlock"' in access
+    assert 'DP_FINGERPRINT_UNLOCK: (EVENT_FINGERPRINT_UNLOCK, "fingerprint")' in access
+    assert 'DP_PASSWORD_UNLOCK: (EVENT_PASSWORD_UNLOCK, "password")' in access
     assert "ACCESS_STORE_MAX_KEYS = 200" in access
     assert "ACCESS_RECORD_REPLAY_DELAY = 2.0" in access
     assert "access_record_key" in access
-    assert '"method": "fingerprint"' in access
+    assert '"method": method' in access
     assert '"recovered"' in access
 
-    # Only the physically validated fingerprint record is enabled for now.
+    # Only fingerprint and password unlock records are enabled for this test.
     assert "DP_FINGERPRINT_UNLOCK" in access
+    assert "DP_PASSWORD_UNLOCK" in access
     assert "DP_MECHANICAL" not in access
     assert "DP_INSIDE" not in access
     assert "DP_LOCK_RECORD" not in access
