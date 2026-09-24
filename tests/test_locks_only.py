@@ -148,3 +148,30 @@ def test_received_local_datapoints_are_exposed_for_lock_record_analysis() -> Non
     assert '"flags"' in devices
     assert '"timestamp"' in devices
     assert '"received_dp_events"' in diagnostics
+
+
+def test_b3_dp69_cached_record_recovery_is_local_and_scoped() -> None:
+    devices = _text("devices.py")
+    diagnostics = _text("diagnostics.py")
+
+    assert 'PRODUCT_B3AOULUH = "b3aouluh"' in devices
+    assert "DP_GET_RECORDS = 69" in devices
+    assert "DP_GET_RECORDS_REQUEST_ACTION = 0x01" in devices
+    assert 'MOBILE_CENTRAL_ID = b"\\xff\\xff"' in devices
+    assert "INITIAL_MOBILE_RANDOM = bytes(8)" in devices
+    assert "self._device.product_id == PRODUCT_B3AOULUH" in devices
+    assert "len(value) == 3" in devices
+    assert "value[2] == DP_GET_RECORDS_REQUEST_ACTION" in devices
+    assert "MOBILE_CENTRAL_ID" in devices
+    assert "+ peripheral_id" in devices
+    assert "+ INITIAL_MOBILE_RANDOM" in devices
+    assert "await datapoint.set_value(response)" in devices
+    assert "self._dp69_response_client is not client" in devices
+
+    assert '"record_recovery"' in diagnostics
+    assert '"dp69_request_count"' in diagnostics
+    assert '"dp69_response_attempt_count"' in diagnostics
+    assert '"dp69_response_count"' in diagnostics
+    assert '"dp69_last_request"' in diagnostics
+    assert '"dp69_last_response"' in diagnostics
+    assert '"dp69_last_error"' in diagnostics
