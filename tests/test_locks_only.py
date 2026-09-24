@@ -99,17 +99,19 @@ def test_product_specific_activity_detection() -> None:
     assert "B3_ACTIVITY_QUIET_INTERVAL = 4.0" in init
     assert "B3_ACTIVITY_FAST_INTERVAL = 0.7" in init
     assert "B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3" in init
-    assert "B3_ACTIVITY_SECOND_BURST_WINDOW = 8.0" in init
-    assert '"double_burst"' in init
+    assert '"burst"' in init
+    assert "B3_ACTIVITY_SECOND_BURST_WINDOW" not in init
+    assert '"double_burst"' not in init
 
     assert "OKKY_ACTIVITY_QUIET_INTERVAL = 15.0" in init
     assert "OKKY_ACTIVITY_FAST_INTERVAL = 0.7" in init
-    assert "OKKY_ACTIVITY_REQUIRED_FAST_INTERVALS = 2" in init
+    assert "OKKY_ACTIVITY_REQUIRED_FAST_INTERVALS = 1" in init
     assert '"payload_change"' in init
     assert '"sparse_burst"' in init
 
     assert "bluetooth.async_last_service_info" in init
     assert "device._decode_advertisement_data()" in init
+    assert "CFM_ACTIVITY_GATT_SETTLE_DELAY = 0.1" in init
     assert "CFM_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0" in init
     assert "await device.reconnect()" in init
     assert init.count("await device.update()") >= 2
@@ -117,12 +119,16 @@ def test_product_specific_activity_detection() -> None:
 
     assert '"observed_at"' in init
     assert '"trigger_reason"' in init
-    assert '"burst_candidate_pending"' in init
     assert '"gatt_connected"' in init
 
     assert '"activity_detector"' in diagnostics
     assert '"trigger_count"' in diagnostics
+    assert '"refresh_attempt_count"' in diagnostics
+    assert '"connect_count"' in diagnostics
+    assert '"refresh_count"' in diagnostics
     assert '"last_trigger_reason"' in diagnostics
-    assert '"b3_first_burst_time"' in diagnostics
+    assert '"last_refresh_error"' in diagnostics
+    assert '"last_refresh_dp47_before"' in diagnostics
+    assert '"last_refresh_dp47_after"' in diagnostics
     assert '"payload_change_count"' in diagnostics
     assert '"gatt_connected"' in diagnostics
