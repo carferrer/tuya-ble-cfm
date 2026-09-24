@@ -79,8 +79,8 @@ def build_access_record(
         "event_type": event_type,
         "method": method,
         "dp_id": dp_id,
-        # Keep this key for storage/backwards compatibility while the exact
-        # semantics of Tuya's numeric unlock value are still being validated.
+        # Keep the existing member_id key for storage/API compatibility while
+        # the exact semantics of Tuya's numeric unlock value remain uncertain.
         "member_id": int(value),
         "event_timestamp": event_timestamp,
         "event_time": datetime.fromtimestamp(event_timestamp, UTC).isoformat(),
