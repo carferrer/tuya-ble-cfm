@@ -34,14 +34,15 @@ PLATFORMS: list[Platform] = [
 PRODUCT_B3AOULUH = "b3aouluh"
 PRODUCT_OKKYFGFS = "okkyfgfs"
 
-# Hardware validation shows that some real b3aouluh physical actions only
-# provide two consecutive fast intervals before the event is effectively lost.
-# Idle advertising can produce the same cadence, so wake early but keep these
-# speculative GATT connections very short to limit battery cost.
+# b3aouluh idle advertising can mimic the short cadence previously used to
+# catch event-like DP47 quickly. Cached-record recovery via DP69 means we no
+# longer need to race the physical event, so require a stronger burst and keep
+# a cooldown after each refresh to avoid disconnect/reconnect loops.
 B3_ACTIVITY_QUIET_INTERVAL = 4.0
 B3_ACTIVITY_FAST_INTERVAL = 0.7
-B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 2
+B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3
 B3_ACTIVITY_IDLE_DISCONNECT_DELAY = 3.0
+B3_ACTIVITY_COOLDOWN = 30.0
 
 # okkyfgfs advertises sparsely and often loses packets at the observed signal
 # level. After a quiet period, reconnect on the first fast interval so GATT is
@@ -109,6 +110,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device._cfm_last_refresh_dp47_before = None
     device._cfm_last_refresh_dp47_after = None
     device._cfm_activity_refresh_history = []
+
+    def _b3_activity_cooldown_remaining() -> float:
+        """Return remaining b3 activity cooldown in seconds."""
+        if device.product_id != PRODUCT_B3AOULUH:
+            return 0.0
+        last_finished = device._cfm_last_refresh_finished_at
+        if last_finished is None:
+            return 0.0
+        return max(0.0, B3_ACTIVITY_COOLDOWN - (time.time() - last_finished))
 
     async def _refresh_after_activity(
         reason: str, advertisement_time: float
@@ -208,6 +218,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         """Schedule exactly one activity refresh while disconnected."""
         if device.connected or device._cfm_activity_update_in_progress:
             return False
+        if _b3_activity_cooldown_remaining() > 0:
+            device._cfm_activity_armed = False
+            device._cfm_activity_fast_streak = 0
+            return False
 
         device._cfm_activity_update_in_progress = True
         device._cfm_activity_armed = False
@@ -302,6 +316,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         delta = None if previous is None else advertisement_time - previous
         triggered = False
         trigger_reason = None
+        b3_cooldown_remaining = _b3_activity_cooldown_remaining()
+
+        if b3_cooldown_remaining > 0:
+            device._cfm_activity_armed = False
+            device._cfm_activity_fast_streak = 0
 
         # okkyfgfs: a distinct payload change is a strong wake candidate. Handle
         # it on the sampler so GATT is not opened inside HA's Bluetooth callback.
@@ -311,7 +330,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 triggered = True
                 trigger_reason = "payload_change"
 
-        if not triggered and delta is not None:
+        if not triggered and delta is not None and b3_cooldown_remaining <= 0:
             if device.product_id == PRODUCT_OKKYFGFS:
                 quiet_interval = OKKY_ACTIVITY_QUIET_INTERVAL
                 fast_interval = OKKY_ACTIVITY_FAST_INTERVAL
@@ -360,6 +379,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "fast_streak": device._cfm_activity_fast_streak,
                 "activity_triggered": triggered,
                 "trigger_reason": trigger_reason,
+                "cooldown_remaining_ms": round(b3_cooldown_remaining * 1000, 1),
             }
         )
         del device._cfm_advertisement_events[:-200]
