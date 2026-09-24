@@ -79,6 +79,18 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "last_trigger_time": getattr(
                 device, "_cfm_last_activity_trigger_time", None
             ),
+            "last_trigger_reason": getattr(
+                device, "_cfm_last_activity_trigger_reason", None
+            ),
+            "b3_first_burst_time": getattr(
+                device, "_cfm_b3_first_burst_time", None
+            ),
+            "payload_activity_pending": bool(
+                getattr(device, "_cfm_payload_activity_pending", False)
+            ),
+            "payload_change_count": int(
+                getattr(device, "_cfm_payload_change_count", 0)
+            ),
         },
         "advertisement_history": list(
             getattr(device, "_cfm_advertisement_history", [])
