@@ -98,7 +98,8 @@ def test_product_specific_activity_detection() -> None:
 
     assert "B3_ACTIVITY_QUIET_INTERVAL = 4.0" in init
     assert "B3_ACTIVITY_FAST_INTERVAL = 0.7" in init
-    assert "B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3" in init
+    assert "B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 2" in init
+    assert "B3_ACTIVITY_IDLE_DISCONNECT_DELAY = 3.0" in init
     assert '"burst"' in init
     assert "B3_ACTIVITY_SECOND_BURST_WINDOW" not in init
     assert '"double_burst"' not in init
@@ -106,20 +107,22 @@ def test_product_specific_activity_detection() -> None:
     assert "OKKY_ACTIVITY_QUIET_INTERVAL = 15.0" in init
     assert "OKKY_ACTIVITY_FAST_INTERVAL = 0.7" in init
     assert "OKKY_ACTIVITY_REQUIRED_FAST_INTERVALS = 1" in init
+    assert "OKKY_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0" in init
     assert '"payload_change"' in init
     assert '"sparse_burst"' in init
 
     assert "bluetooth.async_last_service_info" in init
     assert "device._decode_advertisement_data()" in init
     assert "CFM_ACTIVITY_GATT_SETTLE_DELAY = 0.1" in init
-    assert "CFM_ACTIVITY_IDLE_DISCONNECT_DELAY = 8.0" in init
     assert "await device.reconnect()" in init
     assert init.count("await device.update()") >= 2
-    assert "power_saver_touch(CFM_ACTIVITY_IDLE_DISCONNECT_DELAY)" in init
+    assert "power_saver_touch(idle_delay)" in init
 
     assert '"observed_at"' in init
     assert '"trigger_reason"' in init
     assert '"gatt_connected"' in init
+    assert '"duration_ms"' in init
+    assert "_cfm_activity_refresh_history" in init
 
     assert '"activity_detector"' in diagnostics
     assert '"trigger_count"' in diagnostics
@@ -130,5 +133,6 @@ def test_product_specific_activity_detection() -> None:
     assert '"last_refresh_error"' in diagnostics
     assert '"last_refresh_dp47_before"' in diagnostics
     assert '"last_refresh_dp47_after"' in diagnostics
+    assert '"refresh_history"' in diagnostics
     assert '"payload_change_count"' in diagnostics
     assert '"gatt_connected"' in diagnostics
