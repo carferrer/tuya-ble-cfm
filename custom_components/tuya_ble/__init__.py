@@ -31,16 +31,27 @@ PLATFORMS: list[Platform] = [
     Platform.SELECT,
 ]
 
-# Hardware-observed pattern on b3aouluh: while idle, advertisements are usually
-# separated by several seconds; physical activity produces sustained sub-second
-# advertising. Use a stricter pattern than the first experiment to avoid locks
-# reconnecting on normal advertising noise.
-CFM_ACTIVITY_QUIET_INTERVAL = 4.0
-CFM_ACTIVITY_FAST_INTERVAL = 0.7
-CFM_ACTIVITY_REQUIRED_FAST_INTERVALS = 3
+PRODUCT_B3AOULUH = "b3aouluh"
+PRODUCT_OKKYFGFS = "okkyfgfs"
+
+# b3aouluh normally emits isolated fast bursts even while untouched. A physical
+# action produces repeated bursts much closer together, so require two complete
+# bursts within a short window before opening GATT.
+B3_ACTIVITY_QUIET_INTERVAL = 4.0
+B3_ACTIVITY_FAST_INTERVAL = 0.7
+B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3
+B3_ACTIVITY_SECOND_BURST_WINDOW = 8.0
+
+# okkyfgfs advertises much more sparsely and often loses one or more packets at
+# the observed signal level. Use a longer quiet period and only two fast packets
+# as a cadence fallback. Distinct payload changes are handled separately as a
+# stronger wake signal for this product.
+OKKY_ACTIVITY_QUIET_INTERVAL = 15.0
+OKKY_ACTIVITY_FAST_INTERVAL = 0.7
+OKKY_ACTIVITY_REQUIRED_FAST_INTERVALS = 2
 
 # Activity-triggered connections only need to remain up long enough to read the
-# current state and catch the immediate physical-action notifications. Normal HA
+# current state and catch immediate physical-action notifications. Normal HA
 # commands continue to use the 30 s power-saver timeout.
 CFM_ACTIVITY_GATT_SETTLE_DELAY = 0.5
 CFM_ACTIVITY_SECOND_REFRESH_DELAY = 0.75
@@ -64,8 +75,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device = TuyaBLEDevice(manager, ble_device)
     await device.initialize()
 
-    # Proven behaviour on the user's battery-powered locks: disconnect after
-    # inactivity and reconnect only when needed.
     enable_lock_power_saver(device)
 
     product_info = get_device_product_info(device)
@@ -79,10 +88,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Keep the initial update behaviour of the hardware-tested implementation.
     hass.add_job(device.update())
 
-    # Home Assistant deliberately suppresses callback delivery for byte-for-byte
-    # identical advertisements. Keep the distinct payload history from the
-    # callback, and separately sample async_last_service_info() to observe the
-    # timestamp of repeated packets without opening a GATT connection.
     device._cfm_advertisement_history = []
     device._cfm_advertisement_events = []
     device._cfm_last_advertisement_fingerprint = None
@@ -93,6 +98,56 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     device._cfm_activity_trigger_count = 0
     device._cfm_activity_refresh_count = 0
     device._cfm_last_activity_trigger_time = None
+    device._cfm_last_activity_trigger_reason = None
+    device._cfm_b3_first_burst_time = None
+    device._cfm_payload_activity_pending = False
+    device._cfm_payload_change_count = 0
+
+    async def _refresh_after_activity(reason: str) -> None:
+        """Open GATT briefly and reliably request current DPs after activity."""
+        try:
+            _LOGGER.debug(
+                "%s: BLE activity detected (%s); reconnecting for lock refresh",
+                device.address,
+                reason,
+            )
+
+            await device.reconnect()
+            await asyncio.sleep(CFM_ACTIVITY_GATT_SETTLE_DELAY)
+            await device.update()
+            await asyncio.sleep(CFM_ACTIVITY_SECOND_REFRESH_DELAY)
+            await device.update()
+            device._cfm_activity_refresh_count += 1
+
+            power_saver_touch = getattr(device, "_lock_power_saver_touch", None)
+            if power_saver_touch is not None:
+                power_saver_touch(CFM_ACTIVITY_IDLE_DISCONNECT_DELAY)
+        except Exception:  # noqa: BLE001 - keep scanner callback resilient
+            _LOGGER.exception(
+                "%s: Failed to refresh lock state after BLE activity (%s)",
+                device.address,
+                reason,
+            )
+        finally:
+            device._cfm_activity_update_in_progress = False
+
+    @callback
+    def _start_activity_refresh(reason: str, advertisement_time: float) -> bool:
+        """Schedule exactly one activity refresh while disconnected."""
+        if device.connected or device._cfm_activity_update_in_progress:
+            return False
+
+        device._cfm_activity_update_in_progress = True
+        device._cfm_activity_armed = False
+        device._cfm_activity_fast_streak = 0
+        device._cfm_activity_trigger_count += 1
+        device._cfm_last_activity_trigger_time = advertisement_time
+        device._cfm_last_activity_trigger_reason = reason
+        hass.async_create_task(
+            _refresh_after_activity(reason),
+            f"Tuya BLE CFM lock activity refresh ({reason})",
+        )
+        return True
 
     @callback
     def _async_update_ble(
@@ -115,8 +170,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             tuple(service_data.items()),
             tuple(manufacturer_data.items()),
         )
+        previous_fingerprint = device._cfm_last_advertisement_fingerprint
+        fingerprint_changed = (
+            previous_fingerprint is not None and fingerprint != previous_fingerprint
+        )
 
-        if fingerprint != device._cfm_last_advertisement_fingerprint:
+        if fingerprint != previous_fingerprint:
             device._cfm_last_advertisement_fingerprint = fingerprint
             device._cfm_advertisement_history.append(
                 {
@@ -127,6 +186,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 }
             )
             del device._cfm_advertisement_history[:-30]
+
+            # On okkyfgfs the diagnostic shows very sparse advertising and real
+            # fingerprint changes (manufacturer data present/absent). Preserve
+            # those changes as a strong wake candidate instead of relying only
+            # on a three-packet burst that this product rarely emits.
+            if device.product_id == PRODUCT_OKKYFGFS and fingerprint_changed:
+                device._cfm_payload_activity_pending = True
+                device._cfm_payload_change_count += 1
+
             _LOGGER.debug(
                 "%s: distinct BLE advertisement: service_data=%s manufacturer_data=%s",
                 device.address,
@@ -137,7 +205,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device.set_ble_device_and_advertisement_data(
             service_info.device, advertisement
         )
-        # Passive parsing only; this does not connect to the lock.
         device._decode_advertisement_data()
 
     entry.async_on_unload(
@@ -148,41 +215,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             bluetooth.BluetoothScanningMode.ACTIVE,
         )
     )
-
-    async def _refresh_after_activity() -> None:
-        """Open GATT briefly and reliably request current DPs after activity."""
-        device._cfm_activity_update_in_progress = True
-        try:
-            _LOGGER.debug(
-                "%s: BLE activity burst detected; reconnecting for lock refresh",
-                device.address,
-            )
-
-            # Establish notifications/pairing first, then allow the GATT session
-            # to settle before asking for state. A second status request catches
-            # devices that do not report DP47 on the first request immediately
-            # after reconnecting.
-            await device.reconnect()
-            await asyncio.sleep(CFM_ACTIVITY_GATT_SETTLE_DELAY)
-            await device.update()
-            await asyncio.sleep(CFM_ACTIVITY_SECOND_REFRESH_DELAY)
-            await device.update()
-            device._cfm_activity_refresh_count += 1
-
-            # This connection was opened only because of physical activity; keep
-            # it briefly for follow-up notifications, then save battery. If a
-            # normal HA command occurs, its own packet will restore the normal
-            # 30-second idle timer.
-            power_saver_touch = getattr(device, "_lock_power_saver_touch", None)
-            if power_saver_touch is not None:
-                power_saver_touch(CFM_ACTIVITY_IDLE_DISCONNECT_DELAY)
-        except Exception:  # noqa: BLE001 - keep scanner callback resilient
-            _LOGGER.exception(
-                "%s: Failed to refresh lock state after BLE activity burst",
-                device.address,
-            )
-        finally:
-            device._cfm_activity_update_in_progress = False
 
     @callback
     def _sample_last_advertisement(_now) -> None:
@@ -201,51 +233,88 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         device._cfm_last_seen_advertisement_time = advertisement_time
         delta = None if previous is None else advertisement_time - previous
         triggered = False
+        trigger_reason = None
 
-        if delta is not None:
-            if delta >= CFM_ACTIVITY_QUIET_INTERVAL:
-                # A genuine quiet gap arms the detector. The stricter 4-second
-                # threshold avoids the false reconnects seen with 2.5 seconds.
+        # okkyfgfs: a distinct payload change is more reliable than cadence at
+        # the observed weak signal level. Handle it on the sampler so we do not
+        # open GATT directly inside Home Assistant's Bluetooth callback.
+        if device.product_id == PRODUCT_OKKYFGFS and device._cfm_payload_activity_pending:
+            device._cfm_payload_activity_pending = False
+            if _start_activity_refresh("payload_change", advertisement_time):
+                triggered = True
+                trigger_reason = "payload_change"
+
+        if not triggered and delta is not None:
+            if device.product_id == PRODUCT_OKKYFGFS:
+                quiet_interval = OKKY_ACTIVITY_QUIET_INTERVAL
+                fast_interval = OKKY_ACTIVITY_FAST_INTERVAL
+                required_fast = OKKY_ACTIVITY_REQUIRED_FAST_INTERVALS
+            else:
+                quiet_interval = B3_ACTIVITY_QUIET_INTERVAL
+                fast_interval = B3_ACTIVITY_FAST_INTERVAL
+                required_fast = B3_ACTIVITY_REQUIRED_FAST_INTERVALS
+
+            if delta >= quiet_interval:
                 device._cfm_activity_fast_streak = 0
                 if not device.connected and not device._cfm_activity_update_in_progress:
                     device._cfm_activity_armed = True
-            elif delta < CFM_ACTIVITY_FAST_INTERVAL:
+            elif delta < fast_interval:
                 if (
                     device._cfm_activity_armed
                     and not device.connected
                     and not device._cfm_activity_update_in_progress
                 ):
                     device._cfm_activity_fast_streak += 1
-                    if (
-                        device._cfm_activity_fast_streak
-                        >= CFM_ACTIVITY_REQUIRED_FAST_INTERVALS
-                    ):
-                        triggered = True
-                        device._cfm_activity_armed = False
-                        device._cfm_activity_fast_streak = 0
-                        device._cfm_activity_trigger_count += 1
-                        device._cfm_last_activity_trigger_time = advertisement_time
-                        hass.async_create_task(
-                            _refresh_after_activity(),
-                            "Tuya BLE CFM lock activity refresh",
-                        )
+                    if device._cfm_activity_fast_streak >= required_fast:
+                        if device.product_id == PRODUCT_B3AOULUH:
+                            # One burst is normal for b3aouluh. Only reconnect if
+                            # a second complete burst follows within 8 seconds.
+                            first_burst = device._cfm_b3_first_burst_time
+                            if (
+                                first_burst is not None
+                                and advertisement_time - first_burst
+                                <= B3_ACTIVITY_SECOND_BURST_WINDOW
+                            ):
+                                device._cfm_b3_first_burst_time = None
+                                if _start_activity_refresh(
+                                    "double_burst", advertisement_time
+                                ):
+                                    triggered = True
+                                    trigger_reason = "double_burst"
+                            else:
+                                device._cfm_b3_first_burst_time = advertisement_time
+                                device._cfm_activity_armed = False
+                                device._cfm_activity_fast_streak = 0
+                        else:
+                            if _start_activity_refresh(
+                                "sparse_burst", advertisement_time
+                            ):
+                                triggered = True
+                                trigger_reason = "sparse_burst"
             else:
-                # A medium interval breaks a candidate fast sequence but does
-                # not disarm the detector; another fast sequence may still be
-                # part of the same physical activity window.
                 device._cfm_activity_fast_streak = 0
 
         if device.connected:
             device._cfm_activity_fast_streak = 0
             device._cfm_activity_armed = False
+            device._cfm_payload_activity_pending = False
+            if device.product_id == PRODUCT_B3AOULUH:
+                device._cfm_b3_first_burst_time = None
 
         device._cfm_advertisement_events.append(
             {
+                "observed_at": time.time(),
                 "advertisement_time": advertisement_time,
                 "delta_ms": None if delta is None else round(delta * 1000, 1),
+                "product_id": device.product_id,
+                "gatt_connected": device.connected,
                 "activity_armed": device._cfm_activity_armed,
                 "fast_streak": device._cfm_activity_fast_streak,
+                "burst_candidate_pending": bool(
+                    device._cfm_b3_first_burst_time is not None
+                ),
                 "activity_triggered": triggered,
+                "trigger_reason": trigger_reason,
             }
         )
         del device._cfm_advertisement_events[:-200]
