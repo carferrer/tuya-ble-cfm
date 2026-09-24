@@ -112,6 +112,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "payload_change_count": int(
                 getattr(device, "_cfm_payload_change_count", 0)
             ),
+            "refresh_history": list(
+                getattr(device, "_cfm_activity_refresh_history", [])
+            ),
         },
         "advertisement_history": list(
             getattr(device, "_cfm_advertisement_history", [])
