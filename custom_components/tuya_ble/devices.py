@@ -50,6 +50,7 @@ class TuyaBLEEntity(CoordinatorEntity):
         device: TuyaBLEDevice,
         product: TuyaBLEProductInfo,
         description: EntityDescription,
+        entity_domain: str = "sensor",
     ) -> None:
         super().__init__(coordinator)
         self._hass = hass
@@ -62,10 +63,12 @@ class TuyaBLEEntity(CoordinatorEntity):
         self._attr_has_entity_name = True
         self._attr_device_info = get_device_info(self._device)
         self._attr_unique_id = f"{self._device.device_id}-{description.key}"
-        # Preserve entity-id behaviour of the hardware-tested implementation for
-        # now. Domain migration will be handled separately after functionality is
-        # revalidated on all physical locks.
-        self.entity_id = generate_entity_id("sensor.{}", self._attr_unique_id, hass=hass)
+        # HA resolves existing IDs by (domain, platform, unique_id), preserving
+        # user renames and automation references. Only the provisional ID changes;
+        # the old sensor prefix was already replaced by HA during registration.
+        self.entity_id = generate_entity_id(
+            f"{entity_domain}.{{}}", self._attr_unique_id, hass=hass
+        )
 
     @property
     def available(self) -> bool:

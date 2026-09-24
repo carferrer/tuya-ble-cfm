@@ -16,6 +16,7 @@ _LOGGER = logging.getLogger(__name__)
 
 LOCK_POWER_SAVER_CATEGORIES = {"ms", "jtmspro"}
 DEFAULT_LOCK_IDLE_DISCONNECT_DELAY = 30
+KEEP_ALIVE_MODE = "keep_alive"
 
 
 def enable_lock_power_saver(
@@ -30,6 +31,7 @@ def enable_lock_power_saver(
         return True
 
     device._lock_power_saver_enabled = True
+    device._lock_connection_mode = "power_save"
     device._lock_power_saver_idle_disconnect_delay = max(
         5, int(idle_disconnect_delay)
     )
@@ -50,6 +52,9 @@ def enable_lock_power_saver(
     async def _idle_disconnect(self: Any, delay: float) -> None:
         try:
             await asyncio.sleep(delay)
+
+            if self._lock_connection_mode == KEEP_ALIVE_MODE:
+                return
 
             while self._operation_lock.locked() or self._input_expected_responses:
                 await asyncio.sleep(0.25)
@@ -82,6 +87,9 @@ def enable_lock_power_saver(
         task = self._lock_power_saver_idle_task
         if task and not task.done():
             task.cancel()
+        if self._lock_connection_mode == KEEP_ALIVE_MODE:
+            self._lock_power_saver_idle_task = None
+            return
         effective_delay = (
             float(self._lock_power_saver_idle_disconnect_delay)
             if delay is None
@@ -126,6 +134,9 @@ def enable_lock_power_saver(
 
     async def _reconnect(self: Any) -> None:
         if self._lock_power_saver_stopped or self._lock_power_saver_idle_disconnecting:
+            return
+        if self._lock_connection_mode == KEEP_ALIVE_MODE:
+            await original_reconnect()
             return
         if not (self._operation_lock.locked() or self._input_expected_responses):
             _LOGGER.debug(

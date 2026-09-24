@@ -32,7 +32,7 @@ def test_only_supported_lock_products_are_registered() -> None:
 def test_only_lock_platforms_are_loaded() -> None:
     init = _text("__init__.py")
 
-    for platform in ("BUTTON", "SENSOR", "BINARY_SENSOR", "SELECT"):
+    for platform in ("BUTTON", "SENSOR", "BINARY_SENSOR", "SELECT", "EVENT"):
         assert f"Platform.{platform}" in init
 
     for platform in ("CLIMATE", "NUMBER", "LIGHT", "SWITCH", "TEXT", "COVER"):
@@ -179,3 +179,69 @@ def test_b3_dp69_cached_record_recovery_is_local_and_scoped() -> None:
     assert '"dp69_last_request"' in diagnostics
     assert '"dp69_last_response"' in diagnostics
     assert '"dp69_last_error"' in diagnostics
+
+
+def test_b3_declared_access_methods_are_exposed_as_persistent_events() -> None:
+    access = _text("access.py")
+    event = _text("event.py")
+    sensor = _text("sensor.py")
+
+    expected_dp_constants = {
+        "DP_FINGERPRINT_UNLOCK": 12,
+        "DP_PASSWORD_UNLOCK": 13,
+        "DP_DYNAMIC_PASSWORD_UNLOCK": 14,
+        "DP_CARD_UNLOCK": 15,
+        "DP_BLE_UNLOCK": 19,
+        "DP_TEMPORARY_PASSWORD_UNLOCK": 55,
+        "DP_PHONE_REMOTE_UNLOCK": 62,
+        "DP_VOICE_REMOTE_UNLOCK": 63,
+    }
+    for constant, dp_id in expected_dp_constants.items():
+        assert f"{constant} = {dp_id}" in access
+
+    for event_type in (
+        "fingerprint_unlock",
+        "password_unlock",
+        "dynamic_password_unlock",
+        "card_unlock",
+        "ble_unlock",
+        "temporary_password_unlock",
+        "phone_remote_unlock",
+        "voice_remote_unlock",
+    ):
+        assert f'"{event_type}"' in access
+
+    assert 'DP_FINGERPRINT_UNLOCK: (EVENT_FINGERPRINT_UNLOCK, "fingerprint")' in access
+    assert 'DP_PASSWORD_UNLOCK: (EVENT_PASSWORD_UNLOCK, "password")' in access
+    assert "ACCESS_STORE_MAX_KEYS = 200" in access
+    assert "ACCESS_RECORD_REPLAY_DELAY = 2.0" in access
+    assert "access_record_key" in access
+    assert "access_record_value" in access
+    assert '"access_value": access_value' in access
+    assert '"member_id": access_value' in access
+    assert '"method": method' in access
+    assert '"recovered"' in access
+
+    # Mechanical/inside/lock records are intentionally not inferred as access methods.
+    assert "DP_MECHANICAL" not in access
+    assert "DP_INSIDE" not in access
+    assert "DP_LOCK_RECORD" not in access
+
+    assert "class TuyaBLEAccessEvent(EventEntity)" in event
+    assert "_attr_event_types = ACCESS_EVENT_TYPES" in event
+    assert "self._trigger_event" in event
+    assert "Store(" in event
+    assert "deque(maxlen=ACCESS_STORE_MAX_KEYS)" in event
+    assert "popleft()" in event
+    assert "seen_keys" in event
+    assert "last_record" in event
+    assert "establish a baseline" in event
+    assert "register_callback(self._handle_updates)" in event
+
+    assert "class TuyaBLELastAccessSensor(SensorEntity)" in sensor
+    assert "SensorDeviceClass.TIMESTAMP" in sensor
+    assert "access_record_value" in sensor
+    assert '"access_value"' in sensor
+    assert '"member_id"' in sensor
+    assert '"recovered"' in sensor
+    assert "newest_access_record_from_history" in sensor
