@@ -55,6 +55,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
         "product_id": device.product_id,
         "rssi": device.rssi,
         "datapoints": datapoints,
+        "received_dp_events": list(
+            getattr(device, "_cfm_received_dp_events", [])
+        ),
         "power_saver": {
             "idle_disconnect_delay": getattr(
                 device, "_lock_power_saver_idle_disconnect_delay", None
