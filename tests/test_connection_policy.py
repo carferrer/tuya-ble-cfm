@@ -16,9 +16,14 @@ def test_connection_policy_options_are_exposed_per_entry() -> None:
 
     assert 'CONF_CONNECTION_MODE = "connection_mode"' in policy
     assert 'CONF_SYNC_INTERVAL = "sync_interval_minutes"' in policy
+    assert 'CONNECTION_MODE_ON_DEMAND = "on_demand"' in policy
     assert 'CONNECTION_MODE_POWER_SAVE = "power_save"' in policy
     assert 'CONNECTION_MODE_PERIODIC_SYNC = "periodic_sync"' in policy
     assert 'CONNECTION_MODE_KEEP_ALIVE = "keep_alive"' in policy
+    assert '"Solo bajo demanda — máximo ahorro de batería"' in policy
+    assert '"Detectar actividad — ahorro de batería"' in policy
+    assert '"Sincronización periódica — cada X minutos"' in policy
+    assert '"Siempre conectada — Keep Alive"' in policy
     assert "DEFAULT_SYNC_INTERVAL = 5" in policy
     for interval in (1, 2, 5, 10, 15, 30, 60, 300, 720, 1440):
         assert f"{interval}:" in policy
@@ -63,7 +68,7 @@ def test_periodic_sync_and_keep_alive_use_existing_ble_transport() -> None:
     assert '"periodic_sync_last_error"' in diagnostics
 
 
-def test_periodic_sync_disables_advertising_activity_reconnects() -> None:
+def test_non_activity_modes_disable_advertising_reconnects() -> None:
     policy = _text("connection_policy.py")
 
     assert "activity_detection_enabled = mode == CONNECTION_MODE_POWER_SAVE" in policy
@@ -71,6 +76,7 @@ def test_periodic_sync_disables_advertising_activity_reconnects() -> None:
     assert "device._cfm_activity_armed = False" in policy
     assert "device._cfm_activity_fast_streak = 0" in policy
     assert "device._cfm_activity_update_in_progress = not activity_detection_enabled" in policy
+    assert "if mode == CONNECTION_MODE_ON_DEMAND:" in policy
 
     # Periodic mode must not be skipped because the activity detector is
     # intentionally suppressed by the policy marker above.
