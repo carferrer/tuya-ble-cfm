@@ -20,8 +20,13 @@ def test_connection_policy_options_are_exposed_per_entry() -> None:
     assert 'CONNECTION_MODE_PERIODIC_SYNC = "periodic_sync"' in policy
     assert 'CONNECTION_MODE_KEEP_ALIVE = "keep_alive"' in policy
     assert "DEFAULT_SYNC_INTERVAL = 5" in policy
-    for interval in (1, 2, 5, 10, 15, 30):
+    for interval in (1, 2, 5, 10, 15, 30, 60, 300, 720, 1440):
         assert f"{interval}:" in policy
+
+    assert '60: "1 hour"' in policy
+    assert '300: "5 hours"' in policy
+    assert '720: "12 hours"' in policy
+    assert '1440: "24 hours"' in policy
 
     assert "include_connection_options=True" in config_flow
     assert "CONF_CONNECTION_MODE" in config_flow
