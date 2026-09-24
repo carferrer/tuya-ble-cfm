@@ -34,6 +34,10 @@ SYNC_INTERVALS = {
     10: "10 minutes",
     15: "15 minutes",
     30: "30 minutes",
+    60: "1 hour",
+    300: "5 hours",
+    720: "12 hours",
+    1440: "24 hours",
 }
 DEFAULT_CONNECTION_MODE = CONNECTION_MODE_POWER_SAVE
 DEFAULT_SYNC_INTERVAL = 5
