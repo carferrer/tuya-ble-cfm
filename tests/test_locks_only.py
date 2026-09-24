@@ -98,8 +98,12 @@ def test_product_specific_activity_detection() -> None:
 
     assert "B3_ACTIVITY_QUIET_INTERVAL = 4.0" in init
     assert "B3_ACTIVITY_FAST_INTERVAL = 0.7" in init
-    assert "B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 2" in init
+    assert "B3_ACTIVITY_REQUIRED_FAST_INTERVALS = 3" in init
     assert "B3_ACTIVITY_IDLE_DISCONNECT_DELAY = 3.0" in init
+    assert "B3_ACTIVITY_COOLDOWN = 30.0" in init
+    assert "_b3_activity_cooldown_remaining" in init
+    assert "b3_cooldown_remaining > 0" in init
+    assert '"cooldown_remaining_ms"' in init
     assert '"burst"' in init
     assert "B3_ACTIVITY_SECOND_BURST_WINDOW" not in init
     assert '"double_burst"' not in init
