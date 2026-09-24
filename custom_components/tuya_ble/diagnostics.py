@@ -96,6 +96,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "sync_interval_minutes": getattr(
                 device, "_cfm_periodic_sync_interval_minutes", None
             ),
+            "activity_detection_enabled": bool(
+                getattr(device, "_cfm_activity_detection_enabled", True)
+            ),
             "periodic_sync_attempt_count": int(
                 getattr(device, "_cfm_periodic_sync_attempt_count", 0)
             ),
