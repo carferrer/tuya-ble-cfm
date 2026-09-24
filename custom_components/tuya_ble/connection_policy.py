@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 import logging
-from typing import Any
+import time
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -37,6 +37,7 @@ SYNC_INTERVALS = {
 }
 DEFAULT_CONNECTION_MODE = CONNECTION_MODE_POWER_SAVE
 DEFAULT_SYNC_INTERVAL = 5
+KEEP_ALIVE_WATCHDOG_SECONDS = 30
 
 
 def connection_mode(entry: ConfigEntry) -> str:
@@ -82,13 +83,37 @@ def setup_connection_policy(
     device._cfm_periodic_sync_success_count = 0
     device._cfm_periodic_sync_last_started_at = None
     device._cfm_periodic_sync_last_error = None
+    device._cfm_keep_alive_attempt_count = 0
+    device._cfm_keep_alive_success_count = 0
+    device._cfm_keep_alive_last_error = None
 
     if mode == CONNECTION_MODE_KEEP_ALIVE:
-        # The initial device.update() scheduled by integration setup establishes
-        # GATT. Cancelling the power-saver timer keeps that session alive; the
-        # wrapped reconnect path is allowed to reconnect unexpected drops.
+        async def _keep_alive(_now) -> None:
+            if device.connected:
+                return
+            device._cfm_keep_alive_attempt_count += 1
+            device._cfm_keep_alive_last_error = None
+            try:
+                _LOGGER.debug(
+                    "%s: keep-alive watchdog reconnecting BLE",
+                    device.address,
+                )
+                await device.reconnect()
+                await device.update()
+                device._cfm_keep_alive_success_count += 1
+            except Exception as err:  # noqa: BLE001 - watchdog must survive
+                device._cfm_keep_alive_last_error = f"{type(err).__name__}: {err}"
+                _LOGGER.exception(
+                    "%s: keep-alive BLE reconnect failed",
+                    device.address,
+                )
+
         _LOGGER.info("%s: BLE connection mode is keep-alive", device.address)
-        return None
+        return async_track_time_interval(
+            hass,
+            _keep_alive,
+            timedelta(seconds=KEEP_ALIVE_WATCHDOG_SECONDS),
+        )
 
     if mode != CONNECTION_MODE_PERIODIC_SYNC:
         _LOGGER.info("%s: BLE connection mode is battery saver", device.address)
@@ -103,7 +128,7 @@ def setup_connection_policy(
             return
 
         device._cfm_periodic_sync_attempt_count += 1
-        device._cfm_periodic_sync_last_started_at = __import__("time").time()
+        device._cfm_periodic_sync_last_started_at = time.time()
         device._cfm_periodic_sync_last_error = None
         try:
             _LOGGER.debug(
@@ -117,11 +142,11 @@ def setup_connection_policy(
             await device.update()
             device._cfm_periodic_sync_success_count += 1
 
-            # Keep the GATT window open briefly after the refresh. On b3 locks,
-            # cached access records can arrive a few seconds after DP69.
+            # Keep the GATT window open after the refresh. On b3 locks, cached
+            # access records can arrive a few seconds after the DP69 exchange.
             touch = getattr(device, "_lock_power_saver_touch", None)
             if touch is not None:
-                touch(3.0)
+                touch(5.0)
         except Exception as err:  # noqa: BLE001 - periodic fallback must survive
             device._cfm_periodic_sync_last_error = f"{type(err).__name__}: {err}"
             _LOGGER.exception(
