@@ -63,6 +63,17 @@ def apply_connection_mode(device: TuyaBLEDevice, mode: str) -> None:
     """Apply a connection mode to the already-enabled power saver wrapper."""
     device._lock_connection_mode = mode
 
+    # The advertising cadence detector is intentionally only active in the
+    # pure battery-saver mode. In periodic-sync mode the configured interval is
+    # authoritative; otherwise idle b3 advertising bursts can create extra
+    # reconnects between scheduled synchronizations. Keep-alive has its own
+    # reconnect watchdog and also does not need the advertising detector.
+    activity_detection_enabled = mode == CONNECTION_MODE_POWER_SAVE
+    device._cfm_activity_detection_enabled = activity_detection_enabled
+    device._cfm_activity_armed = False
+    device._cfm_activity_fast_streak = 0
+    device._cfm_activity_update_in_progress = not activity_detection_enabled
+
     idle_task = getattr(device, "_lock_power_saver_idle_task", None)
     if mode == CONNECTION_MODE_KEEP_ALIVE and idle_task and not idle_task.done():
         idle_task.cancel()
@@ -123,8 +134,6 @@ def setup_connection_policy(
 
     async def _periodic_sync(_now) -> None:
         if device.connected:
-            return
-        if getattr(device, "_cfm_activity_update_in_progress", False):
             return
 
         device._cfm_periodic_sync_attempt_count += 1
