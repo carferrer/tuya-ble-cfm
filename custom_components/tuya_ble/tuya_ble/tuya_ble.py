@@ -1155,7 +1155,10 @@ class TuyaBLEDevice:
                 end_pos += 13
                 if end_pos > len(data):
                     raise TuyaBLEDataLengthError()
-                timestamp = int(data[pos:end_pos].decode()) / 1000
+                try:
+                    timestamp = int(data[pos:end_pos].decode()) / 1000
+                except (ValueError, UnicodeError) as err:
+                    raise TuyaBLEDataFormatError() from err
                 pass
             case 1:
                 end_pos += 4
@@ -1177,9 +1180,12 @@ class TuyaBLEDevice:
         self, timestamp: float, flags: int, data: bytes, start_pos: int
     ) -> int:
         datapoints: list[TuyaBLEDataPoint] = []
+        parsed = []
 
         pos = start_pos
-        while len(data) - pos >= 4:
+        while pos < len(data):
+            if len(data) - pos < 3:
+                raise TuyaBLEDataLengthError()
             id: int = data[pos]
             pos += 1
             _type: int = data[pos]
@@ -1201,8 +1207,16 @@ class TuyaBLEDevice:
                 case (TuyaBLEDataPointType.DT_VALUE | TuyaBLEDataPointType.DT_ENUM):
                     value = int.from_bytes(raw_value, "big", signed=True)
                 case TuyaBLEDataPointType.DT_STRING:
-                    value = raw_value.decode()
+                    try:
+                        value = raw_value.decode()
+                    except UnicodeError as err:
+                        raise TuyaBLEDataFormatError() from err
 
+            parsed.append((id, type, value))
+            pos = next_pos
+
+        # Validate the entire payload before exposing any partial DP updates.
+        for id, type, value in parsed:
             _LOGGER.debug(
                 "%s: Received datapoint update, id: %s, type: %s: value: %s",
                 self.address,
@@ -1213,7 +1227,6 @@ class TuyaBLEDevice:
             self._datapoints._update_from_device(
                 id, timestamp, flags, type, value)
             datapoints.append(self._datapoints[id])
-            pos = next_pos
 
         self._fire_callbacks(datapoints)
 
@@ -1291,6 +1304,8 @@ class TuyaBLEDevice:
                     self._send_response(code, bytes(0), seq_num))
 
             case TuyaBLECode.FUN_RECEIVE_SIGN_DP:
+                if len(data) < 3:
+                    raise TuyaBLEDataLengthError()
                 dp_seq_num = int.from_bytes(data[:2], "big")
                 flags = data[2]
                 self._parse_datapoints_v3(time.time(), flags, data, 2)
@@ -1306,6 +1321,8 @@ class TuyaBLEDevice:
                     self._send_response(code, bytes(0), seq_num))
 
             case TuyaBLECode.FUN_RECEIVE_SIGN_TIME_DP:
+                if len(data) < 3:
+                    raise TuyaBLEDataLengthError()
                 timestamp: float
                 pos: int
                 dp_seq_num = int.from_bytes(data[:2], "big")
@@ -1335,12 +1352,20 @@ class TuyaBLEDevice:
         self._input_expected_length = 0
 
     def _parse_input(self) -> None:
-        security_flag = self._input_buffer[0]
-        key = self._get_key(security_flag)
-        iv = self._input_buffer[1:17]
-        encrypted = self._input_buffer[17:]
-
+        frame = self._input_buffer
         self._clean_input()
+        # Security flag + IV + at least one complete AES block. The payload
+        # length is uint16; include header, CRC and the maximum AES padding.
+        if frame is None or not 33 <= len(frame) <= 65569:
+            raise TuyaBLEDataLengthError()
+        if (len(frame) - 17) % 16:
+            raise TuyaBLEDataLengthError()
+        security_flag = frame[0]
+        key = self._get_key(security_flag)
+        if not key or len(key) not in (16, 24, 32):
+            raise TuyaBLEDataFormatError()
+        iv = frame[1:17]
+        encrypted = frame[17:]
 
         cipher = AES.new(key, AES.MODE_CBC, iv)
         raw = cipher.decrypt(encrypted)
@@ -1353,16 +1378,15 @@ class TuyaBLEDevice:
 
         data_end_pos = length + 12
         raw_length = len(raw)
-        if raw_length < data_end_pos:
+        if raw_length < data_end_pos + 2:
             raise TuyaBLEDataLengthError()
-        if raw_length > data_end_pos:
-            calc_crc = self._calc_crc16(raw[:data_end_pos])
-            (data_crc,) = unpack(
-                ">H",
-                raw[data_end_pos:data_end_pos + 2]  # fmt: skip
-            )
-            if calc_crc != data_crc:
-                raise TuyaBLEDataCRCError()
+        calc_crc = self._calc_crc16(raw[:data_end_pos])
+        (data_crc,) = unpack(
+            ">H",
+            raw[data_end_pos:data_end_pos + 2]  # fmt: skip
+        )
+        if calc_crc != data_crc:
+            raise TuyaBLEDataCRCError()
         data = raw[12:data_end_pos]
 
         code: TuyaBLECode
@@ -1399,6 +1423,14 @@ class TuyaBLEDevice:
 
     def _notification_handler(self, _sender: int, data: bytearray) -> None:
         """Handle notification responses."""
+        try:
+            self._receive_notification(data)
+        except (TuyaBLEDataLengthError, TuyaBLEDataFormatError, TuyaBLEDataCRCError) as err:
+            self._clean_input()
+            _LOGGER.warning("%s: Discarding invalid BLE frame: %s", self.address, err)
+
+    def _receive_notification(self, data: bytearray) -> None:
+        """Reassemble ordered fragments; restart only at a new frame boundary."""
         _LOGGER.debug("%s: Packet received: %s", self.address, data.hex())
 
         pos: int = 0
@@ -1407,8 +1439,8 @@ class TuyaBLEDevice:
         packet_num, pos = self._unpack_int(data, pos)
 
         if packet_num < self._input_expected_packet_num:
-            _LOGGER.error(
-                "%s: Unexpcted packet (number %s) in notifications, " "expected %s",
+            _LOGGER.debug(
+                "%s: Unexpected packet (number %s) in notifications, expected %s",
                 self.address,
                 packet_num,
                 self._input_expected_packet_num,
@@ -1419,11 +1451,19 @@ class TuyaBLEDevice:
             if packet_num == 0:
                 self._input_buffer = bytearray()
                 self._input_expected_length, pos = self._unpack_int(data, pos)
+                if not 33 <= self._input_expected_length <= 65569:
+                    raise TuyaBLEDataLengthError()
+                if (self._input_expected_length - 17) % 16:
+                    raise TuyaBLEDataLengthError()
+                if pos >= len(data):
+                    raise TuyaBLEDataLengthError()
                 pos += 1
+            if pos >= len(data):
+                raise TuyaBLEDataLengthError()
             self._input_buffer += data[pos:]
             self._input_expected_packet_num += 1
         else:
-            _LOGGER.error(
+            _LOGGER.debug(
                 "%s: Missing packet (number %s) in notifications, received %s",
                 self.address,
                 self._input_expected_packet_num,
@@ -1433,8 +1473,8 @@ class TuyaBLEDevice:
             return
 
         if len(self._input_buffer) > self._input_expected_length:
-            _LOGGER.error(
-                "%s: Unexpcted length of data in notifications, "
+            _LOGGER.warning(
+                "%s: Unexpected length of data in notifications, "
                 "received %s expected %s",
                 self.address,
                 len(self._input_buffer),
