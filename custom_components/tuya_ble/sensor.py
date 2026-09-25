@@ -27,6 +27,7 @@ from .access import (
     access_store_key,
     newest_access_record_from_history,
 )
+from .alarm import ALARM_OPTIONS
 from .const import DOMAIN
 from .devices import (
     PRODUCT_B3AOULUH,
@@ -62,23 +63,6 @@ class TuyaBLEBatteryMapping(TuyaBLESensorMapping):
             state_class=SensorStateClass.MEASUREMENT,
         )
     )
-
-
-ALARM_OPTIONS = [
-    "wrong_finger",
-    "wrong_password",
-    "wrong_card",
-    "wrong_face",
-    "tongue_bad",
-    "too_hot",
-    "unclosed_time",
-    "tongue_not_out",
-    "pry",
-    "key_in",
-    "low_battery",
-    "power_off",
-    "shock",
-]
 
 
 def alarm_mapping() -> TuyaBLESensorMapping:
