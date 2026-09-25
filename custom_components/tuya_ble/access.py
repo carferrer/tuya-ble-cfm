@@ -78,6 +78,7 @@ def build_access_record(
 
     return {
         "event_type": event_type,
+        "event_type_id": dp_id,
         "method": method,
         "dp_id": dp_id,
         # Tuya exposes an integer for these access records, but its exact
