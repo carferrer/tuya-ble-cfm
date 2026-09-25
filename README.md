@@ -1,110 +1,270 @@
 # Tuya BLE CFM
 
-Specialized Home Assistant custom integration for the Tuya BLE locks used in this installation.
+Integración personalizada de Home Assistant para las cerraduras Tuya BLE de esta instalación. Este fork mantiene un catálogo reducido y el transporte BLE que se ha probado en las cerraduras reales.
 
-This fork intentionally keeps a narrow scope instead of following the complete upstream device catalogue. Its priority is preserving the BLE behaviour that has been validated on the physical locks, especially low battery consumption and device-originated state updates.
+Permite controlar las funciones básicas, configurar cuándo conectar por Bluetooth y recuperar registros locales de aperturas y alarmas. Los eventos incluyen la hora original de la cerradura y un identificador de tipo estable para automatizaciones y archivos externos.
 
-## Supported locks
+## Estado actual
 
-Only these two Tuya product IDs are intentionally supported:
+Consolidado en `main`:
 
-- `okkyfgfs` — P196_V (`ms`)
-- `b3aouluh` — Smart Lock (`jtmspro`)
+- Corrección del acuse de recibo de registros con fecha para recuperar varios registros pendientes en una conexión.
+- Eventos de apertura y de alarma independientes, con protección persistente contra duplicados.
+- Atributo `event_type_id` para identificar el tipo de apertura o alarma.
+- Opciones de conexión por cerradura y sincronización periódica.
+- Corrección de los dominios sugeridos de `entity_id`, conservando los `unique_id` y las entidades registradas.
+- Validación de frames BLE, recuperación ante fragmentos inválidos y contención de errores de longitud.
 
-The current installation uses one `okkyfgfs` and four `b3aouluh` locks.
+Se han probado físicamente la recuperación de varias aperturas, los accesos por huella y código, las alarmas de huella/código incorrectos y los avisos por Pushover con `event_type_id`. Los demás tipos están implementados y cubiertos por pruebas automáticas, pero todavía requieren validación física.
 
-## Exposed entities
+## Cerraduras compatibles
 
-The fork keeps only the platforms needed by these locks:
+| Product ID | Modelo / categoría | Funciones básicas | Eventos Access / Alarm events y recuperación DP69 |
+| --- | --- | --- | --- |
+| `b3aouluh` | Smart Lock / `jtmspro` | Sí | Sí |
+| `okkyfgfs` | P196_V / `ms` | Sí | Pendientes de validar y adaptar |
 
-- Button: DP6 `bluetooth_unlock`
-- Select: DP31 `beep_volume`
-- Binary sensor: DP47 `lock_motor_state`
-- Sensor: DP21 `alarm_lock`
-- Battery: DP8 on `okkyfgfs`, DP9 `battery_state` on `b3aouluh`
-- RSSI diagnostic sensor
-- Access events and Last access timestamp on `b3aouluh`
-- Alarm events (DP21) on `b3aouluh`, separate from the existing Alarm sensor
+La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. La compatibilidad de otros productos Tuya no está garantizada.
 
-### Alarm events
+## Instalación y actualización
 
-Both Access and Alarm events include an integer `event_type_id` for external
-archives such as MSSQL. These are fixed integration identifiers, not Tuya-issued
-record IDs: access types use their DP number (12, 13, 14, 15, 19, 55, 62, 63),
-and alarm types use 2100 + enum value (2100–2112 in the order below).
-The ID identifies a type, not an individual occurrence. Existing attributes,
-entity IDs, timestamps and deduplication keys are unchanged. The attribute is
-included with the next new event; previously seen records are not re-emitted.
+### HACS
 
-The `Alarm events` entity emits one event for each unseen DP21 alarm record,
-including records downloaded during a later BLE synchronization. Two failures of
-the same type with different lock timestamps produce two events. It makes no
-additional BLE connections and uses the existing connection policy and record
-recovery. Access events, their IDs, and their storage are unchanged.
+1. Añade `https://github.com/carferrer/tuya-ble-cfm` como repositorio personalizado de tipo **Integración**.
+2. Instala Tuya BLE CFM.
+3. Reinicia Home Assistant.
+4. Añade o configura la integración Tuya BLE en **Ajustes → Dispositivos y servicios**.
 
-Supported event types, in DP21 enum order (0–12): `wrong_finger`,
-`wrong_password`, `wrong_card`, `wrong_face`, `tongue_bad`, `too_hot`,
-`unclosed_time`, `tongue_not_out`, `pry`, `key_in`, `low_battery`, `power_off`,
-`shock`. Cached `wrong_finger` and `wrong_password` records have been physically
-verified on `b3aouluh`; the remaining types emit when the lock reports them.
-The other model (`okkyfgfs`) is not enabled for this new entity pending testing.
+Un cambio en `main` no implica que se haya publicado una nueva release para HACS. Comprueba qué versión estás instalando.
 
-Event attributes include `event_type`, `dp_id`, `alarm_value`, `event_time`
-(original lock time, UTC), `received_at` (UTC), `delay_seconds`, and `recovered`
-(receipt more than two seconds after the lock timestamp). The entity's state is
-the time Home Assistant emits the event, not the original attempt time; this
-follows the [Home Assistant event entity API](https://developers.home-assistant.io/docs/core/entity/event/).
-Automations should trigger on this entity's state and read
-`trigger.to_state.attributes` to retain the data for each event in a batch.
+### Instalación manual de main
 
-Deduplication retains the most recent 200 record keys per lock in separate
-persistent alarm storage. Reloads suppress records still in this window.
-Records already cached when the entity is first initialized establish a silent
-baseline; unseen records arriving afterwards emit normally, including old
-records recovered from the lock. Identical type/timestamp records cannot be
-distinguished, and records evicted from the deduplication window can emit again.
+1. Descarga [main en ZIP](https://github.com/carferrer/tuya-ble-cfm/archive/refs/heads/main.zip).
+2. Copia la carpeta `custom_components/tuya_ble` del ZIP a `/config/custom_components/tuya_ble`.
+3. Asegúrate de copiar todos los archivos, incluidos `alarm.py` y `alarm_event.py`.
+4. Reinicia Home Assistant y recarga la página del navegador.
 
-## BLE power saving
+Las nuevas entidades se pueden localizar en **Herramientas para desarrolladores → Estados** y en la ficha del dispositivo. Los nombres concretos dependen del nombre asignado a la cerradura y de posibles personalizaciones.
 
-The integration uses the hardware-tested CFM power saver. Locks disconnect their GATT link after 30 seconds of inactivity and reconnect when required, while keeping the legacy Tuya BLE transport that has already been validated on the real hardware.
+Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compatible o un proxy Bluetooth ESPHome. La recuperación de registros descrita aquí es local por BLE; no requiere un gateway Tuya Wi-Fi/Bluetooth para descargar esos registros.
 
-The newer upstream 0.12.x transport is deliberately not used in this branch because hardware testing showed regressions with device-originated lock state and DP21 alarm events.
+## Entidades
 
-## Installation with HACS
+| Entidad | DP / función |
+| --- | --- |
+| Botón `bluetooth_unlock` | DP6, desbloqueo Bluetooth |
+| Selector `beep_volume` | DP31, volumen |
+| Sensor binario `lock_motor_state` | DP47, estado del motor |
+| Sensor `Alarm` | DP21, último valor de alarma recibido |
+| Batería | DP8 en `okkyfgfs`; DP9 `battery_state` en `b3aouluh` |
+| RSSI | Diagnóstico de señal |
+| Evento `Access` | Aperturas, solo `b3aouluh` |
+| Sensor `Last access` | Hora de la apertura más reciente, solo `b3aouluh` |
+| Evento `Alarm events` | Registros individuales DP21, solo `b3aouluh` |
 
-1. Open HACS in Home Assistant.
-2. Add `https://github.com/carferrer/tuya-ble-cfm` as a custom repository of type **Integration**.
-3. Install **Tuya BLE CFM**.
-4. Restart Home Assistant.
-5. Add or reload the Tuya BLE integration from **Settings > Devices & services**.
+El sensor `Alarm` muestra un estado. `Alarm events` permite reaccionar a cada registro nuevo, incluidos varios fallos consecutivos del mismo tipo con horas distintas. Las alarmas no se convierten en aperturas ni modifican `Last access`.
 
-Published GitHub releases include `tuya_ble.zip`, which HACS uses for installation and upgrades.
+## Conexión y ahorro de batería
 
-## Validation
+La política se configura por cerradura en las opciones de la integración.
 
-Pull requests are checked with Home Assistant Hassfest, HACS validation, Ruff and Pytest. Regression tests also verify that only the two supported product IDs and the tested BLE transport remain enabled.
+| Modo | Funcionamiento |
+| --- | --- |
+| Solo bajo demanda (`on_demand`) | Sin sincronización periódica ni reconexión por anuncios de actividad; conecta cuando una operación lo requiere. |
+| Detectar actividad (`power_save`) | Utiliza el detector de actividad de anuncios BLE para intentar conectar. Es el modo predeterminado; no garantiza detectar cada acción física. |
+| Sincronización periódica (`periodic_sync`) | Conecta cada intervalo configurado para actualizar y recuperar registros. La detección por anuncios queda desactivada. |
+| Siempre conectada (`keep_alive`) | Desactiva la desconexión por inactividad y utiliza un supervisor de reconexión cada 30 segundos. |
 
-## Credits
+Intervalos disponibles: **1, 2, 5, 10, 15, 30 y 60 minutos; 5, 12 y 24 horas**. El valor predeterminado del intervalo es 5 minutos y se utiliza en modo periódico.
 
-Derived from the `ha-tuya-ble/ha_tuya_ble` project and its contributors.
+El ahorro utiliza desconexión por inactividad, con un plazo base de 30 segundos y ajustes según la operación y el modo. Las entidades de eventos aprovechan las conexiones existentes; no añaden sondeos propios.
 
-## License
+En modo periódico, los avisos se reciben al sincronizar, no necesariamente en el momento del suceso. Un intervalo mayor reduce la frecuencia de conexiones y aumenta la espera de los avisos. No se ha medido todavía la autonomía final de las baterías.
 
-MIT License. See [LICENSE](LICENSE).
+## Recuperación de registros locales
 
-## Entity IDs and BLE recovery
+En `b3aouluh`, DP69 participa en la recuperación de registros pendientes. La integración responde a la solicitud de la cerradura y confirma los registros con fecha mediante un acuse de recibo de un byte de éxito (`0x00`).
 
-Entity constructors now suggest IDs in their own platform domain (`button`,
-`binary_sensor`, `select`, or `sensor`). Existing `unique_id` values are unchanged.
-Home Assistant already registers unique-ID entities under their platform domain,
-even when an integration suggests a different prefix. It reuses the registered
-ID (including custom names and collision suffixes) on reload. No registry entries
-are deleted or renamed, and automation references do not need migration. The
-previous `sensor.*` suggestions were the source of the domain deprecation warning,
-not evidence that buttons were registered as sensors.
+La corrección del acuse de recibo permitió comprobar que se reciben varios registros en una misma conexión, tanto aperturas como alarmas. No se asume una capacidad concreta de almacenamiento de la cerradura ni una conservación ilimitada.
 
-The BLE receiver discards malformed or incomplete frames and resumes at the next
-start fragment. Recoverable ordering interruptions are logged at debug level;
-invalid lengths, CRCs and payloads are warnings. Valid fragmented frames still
-reassemble normally. DP69 handshake, access timestamps, event mappings and
-persistent deduplication remain unchanged.
+Los registros pueden llegar del más reciente al más antiguo. Por eso:
+
+- `event_time` conserva la hora original del suceso.
+- `received_at` indica cuándo lo recibió la integración.
+- `Last access` conserva la mayor fecha de apertura, aunque llegue después un registro más antiguo.
+- El estado de una entidad `event.*` es la hora de emisión en Home Assistant; para archivar el suceso se debe usar `event_time`.
+
+### Protección contra duplicados
+
+Access y Alarm events guardan por separado hasta **200 claves por cerradura**, persistidas en el almacenamiento de Home Assistant.
+
+- Un registro ya conocido dentro de esa ventana no vuelve a emitir un evento.
+- En la primera inicialización, el historial que ya esté en memoria establece una base silenciosa.
+- Los registros nuevos que lleguen después sí pueden emitir avisos, incluso si son antiguos y se acaban de recuperar de la cerradura.
+- En posteriores cargas, se procesan los registros del historial que aún no se hayan visto.
+- Un registro expulsado de la ventana de 200 claves podría volver a emitirse si se recibe de nuevo.
+- Dos registros con el mismo DP, hora y valor no se pueden distinguir.
+
+Añadir un atributo nuevo, como `event_type_id`, no fuerza a reproducir eventos antiguos: aparecerá con el siguiente registro nuevo.
+
+## Catálogo de aperturas
+
+| DP | event_type_id | event_type | method |
+| --- | --- | --- | --- |
+| 12 | 12 | `fingerprint_unlock` | `fingerprint` |
+| 13 | 13 | `password_unlock` | `password` |
+| 14 | 14 | `dynamic_password_unlock` | `dynamic_password` |
+| 15 | 15 | `card_unlock` | `card` |
+| 19 | 19 | `ble_unlock` | `ble` |
+| 55 | 55 | `temporary_password_unlock` | `temporary_password` |
+| 62 | 62 | `phone_remote_unlock` | `phone_remote` |
+| 63 | 63 | `voice_remote_unlock` | `voice_remote` |
+
+Se aceptan los DP de apertura declarados como `DT_VALUE`. La integración emite únicamente los registros que recibe; no deduce una apertura a partir del estado del motor o de haber pulsado el botón de desbloqueo.
+
+## Catálogo de alarmas
+
+Todas utilizan **DP21**, de tipo `DT_ENUM`.
+
+| alarm_value | event_type_id | event_type |
+| --- | --- | --- |
+| 0 | 2100 | `wrong_finger` |
+| 1 | 2101 | `wrong_password` |
+| 2 | 2102 | `wrong_card` |
+| 3 | 2103 | `wrong_face` |
+| 4 | 2104 | `tongue_bad` |
+| 5 | 2105 | `too_hot` |
+| 6 | 2106 | `unclosed_time` |
+| 7 | 2107 | `tongue_not_out` |
+| 8 | 2108 | `pry` |
+| 9 | 2109 | `key_in` |
+| 10 | 2110 | `low_battery` |
+| 11 | 2111 | `power_off` |
+| 12 | 2112 | `shock` |
+
+Los valores de alarma desconocidos o los registros con fechas inválidas se ignoran en la entidad de eventos.
+
+## Atributos de los eventos
+
+| Atributo | Contenido |
+| --- | --- |
+| `event_type` | Nombre del tipo, según los catálogos |
+| `event_type_id` | Entero estable: DP de apertura o 2100 + enum de alarma |
+| `dp_id` | DP de origen |
+| `event_time` | Fecha original, ISO 8601 en UTC |
+| `received_at` | Fecha de recepción, ISO 8601 en UTC |
+| `delay_seconds` | Diferencia entre recepción y suceso, limitada a un mínimo de cero |
+| `recovered` | Verdadero cuando la diferencia supera 2 segundos; es una clasificación por retraso |
+| `method` | Método de apertura, solo Access |
+| `access_value` | Entero original del registro de apertura |
+| `member_id` | Alias de `access_value` por compatibilidad |
+| `alarm_value` | Enum original de alarma, solo Alarm events |
+
+`access_value` no se interpreta como una identidad de usuario confirmada: su significado depende del método y del dispositivo. `event_type_id` es una convención de esta integración, no un identificador de registro proporcionado por Tuya.
+
+## Ejemplo: aperturas y alarmas por Pushover
+
+Sustituye las entidades y la acción `notify.pushover` por las de tu instalación. El ejemplo utiliza la cerradura del salón.
+
+La automatización escucha cambios de las entidades de evento. Utiliza `trigger.to_state.attributes` para conservar los datos de cada aviso cuando se recibe un lote. El modo en cola admite hasta 100 ejecuciones pendientes/activas.
+
+```yaml
+alias: "Accesos y alarmas salón → Pushover"
+triggers:
+  - trigger: state
+    entity_id:
+      - event.cerradura_puerta_salon_access
+      - event.cerradura_puerta_salon_alarm_events
+    not_to:
+      - "unavailable"
+      - "unknown"
+
+conditions:
+  - condition: template
+    value_template: >-
+      {{ trigger.to_state is not none
+         and trigger.to_state.attributes.get('event_time') is not none
+         and trigger.to_state.attributes.get('received_at') is not none }}
+
+actions:
+  - action: notify.pushover
+    data:
+      title: >-
+        {% if trigger.to_state.attributes.get('dp_id') == 21 %}
+          Alarma puerta salón
+        {% else %}
+          Apertura puerta salón
+        {% endif %}
+      message: |-
+        {% set a = trigger.to_state.attributes %}
+        Tipo: {{ a.get('event_type', 'desconocido') }}
+        ID de tipo: {{ a.get('event_type_id', 'sin ID') }}
+        {% if a.get('dp_id') != 21 %}
+        Método: {{ a.get('method', 'desconocido') }}
+        {% endif %}
+        Hora suceso: {{ as_local(as_datetime(a['event_time'])).strftime('%d/%m/%Y %H:%M:%S') }}
+        Hora recepción: {{ as_local(as_datetime(a['received_at'])).strftime('%d/%m/%Y %H:%M:%S') }}
+        DP: {{ a.get('dp_id') }}
+        Valor Tuya: {{ a.get('alarm_value', a.get('access_value')) }}
+        Recuperado: {{ 'Sí' if a.get('recovered') else 'No' }}
+        Retraso: {{ a.get('delay_seconds') }} segundos
+
+mode: queued
+max: 100
+```
+
+Para probarla, genera un nuevo acceso o alarma y espera la sincronización. Ejecutar manualmente las acciones no proporciona el contexto `trigger` que utiliza la plantilla. Los registros históricos nuevos para la integración también pueden generar notificaciones.
+
+Referencias: [entidades de evento](https://www.home-assistant.io/integrations/event/), [Pushover](https://www.home-assistant.io/integrations/pushover/).
+
+## Archivo externo en MSSQL
+
+La integración proporciona los datos; **no escribe directamente en MSSQL**. La automatización o servicio que los archive debe guardar cada evento recibido.
+
+Modelo de campos propuesto:
+
+| Campo | Uso |
+| --- | --- |
+| `Id` | `BIGINT IDENTITY`, clave de cada fila |
+| `DeviceId` | Identificador estable de la cerradura, asignado o resuelto por el archivador |
+| `EventTypeId` | `event_type_id`, referencia al catálogo de tipos |
+| `EventTimeUtc` | Hora original normalizada a UTC |
+| `ReceivedAtUtc` | Hora de recepción normalizada a UTC |
+| `RawValue` | `access_value` o `alarm_value` |
+
+El tipo de evento y la fila del histórico tienen identificadores distintos. Para evitar reinserciones puede usarse una clave única sobre `DeviceId + EventTypeId + EventTimeUtc + RawValue`, conservando la precisión de la fecha original. Dos sucesos idénticos con el mismo timestamp de la cerradura no se podrán distinguir. `DeviceId` no es un atributo añadido a estos eventos: debe aportarlo el archivador a partir de la entidad de origen.
+
+## Compatibilidad y robustez BLE
+
+Los constructores sugieren IDs en su dominio correcto (`button`, `binary_sensor`, `select` o `sensor`). Los `unique_id` existentes se conservan; no se renombran ni eliminan entidades registradas para aplicar esta corrección.
+
+El parser valida longitudes, estructura, cifrado y CRC. Los frames válidos fragmentados se recomponen; los inválidos o incompletos se descartan y el receptor puede recuperarse con el siguiente inicio de frame. Los errores de longitud de datos se contienen en el procesamiento de notificaciones.
+
+Los problemas recuperables de orden de paquetes se registran en debug y los frames inválidos en warning. Estas mejoras no cambian el protocolo DP69 ni convierten una conexión fallida en una conexión válida.
+
+Se conserva el transporte BLE de este fork. La migración al transporte upstream 0.12.x no se incorporó porque las pruebas físicas mostraron regresiones.
+
+## Diagnóstico y trabajo pendiente
+
+El diagnóstico de la integración incluye DP recibidos con sus horas, actividad BLE, contadores de recuperación DP69 y estado de la política de conexión.
+
+Se han observado fallos `starting notifications failed`, `GATT Error 133`, desconexiones inesperadas y algún timeout. Una señal débil puede influir, pero el mensaje por sí solo no identifica la causa. La mejora de limpieza de conexiones fallidas, reintentos y nivel de log está **pendiente**; no forma parte de los cambios de eventos ya validados.
+
+También quedan pendientes:
+
+- Obtener y validar los DP de eventos de la otra cerradura, `okkyfgfs`.
+- Probar físicamente los métodos de apertura y alarmas aún no ensayados.
+- Medir la autonomía real con los distintos intervalos de conexión.
+- Implementar, si se necesita, el envío externo a MSSQL.
+
+## Validación
+
+La versión consolidada de eventos e IDs pasó **88 pruebas**, Ruff, Hassfest y HACS. Las pruebas cubren el parser BLE, el alcance de los productos, las políticas de conexión, los IDs de entidades y el comportamiento de los eventos: tipos, fechas, duplicados, carga inicial y recargas.
+
+Las pruebas de entidades utilizan dobles ligeros de los límites de Home Assistant. Se complementan con las pruebas físicas descritas arriba; no equivalen a haber probado todos los tipos de evento en todas las cerraduras.
+
+## Créditos y licencia
+
+Derivado del proyecto `ha-tuya-ble/ha_tuya_ble` y de sus colaboradores.
+
+Licencia MIT. Consulta los archivos de licencia incluidos en el repositorio.
