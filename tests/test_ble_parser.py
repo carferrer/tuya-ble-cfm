@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 import logging
 from pathlib import Path
 from struct import pack, unpack
 import time
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 from Crypto.Cipher import AES
 import pytest
@@ -22,6 +24,7 @@ def device():
         "pack": pack,
         "unpack": unpack,
         "time": time,
+        "asyncio": asyncio,
         "_LOGGER": logging.getLogger("parser_test"),
     }
     for name in ("const.py", "exceptions.py"):
@@ -68,9 +71,12 @@ def device():
     return obj
 
 
-def frame(device, payload=b"\x00", *, length=None, bad_crc=False, flag=1, code=3):
+def frame(
+    device, payload=b"\x00", *, length=None, bad_crc=False, flag=1, code=3, seq_num=1
+):
     raw = (
-        pack(">IIHH", 1, 0, code, len(payload) if length is None else length) + payload
+        pack(">IIHH", seq_num, 0, code, len(payload) if length is None else length)
+        + payload
     )
     raw += pack(">H", device._calc_crc16(raw) ^ int(bad_crc))
     raw += bytes((-len(raw)) % 16)
@@ -197,3 +203,73 @@ def test_valid_dp69_and_access_payload_values_preserved(device):
         (69, 123, b"\xff\xff\x01"),
         (12, 123, 7),
     ]
+
+
+@pytest.mark.parametrize("time_type", [0, 1])
+def test_timestamped_records_ack_status_sequence_and_original_values(device, time_type):
+    """Each complete timestamped record gets its own one-byte success ACK."""
+
+    class Datapoints(dict):
+        def _update_from_device(self, id, timestamp, flags, type, value):
+            self[id] = (id, timestamp, flags, type, value)
+
+    device._datapoints = Datapoints()
+    records = []
+    device._fire_callbacks = records.extend
+    device._handle_command_or_response = type(
+        device
+    )._handle_command_or_response.__get__(device)
+    device._send_response = AsyncMock()
+    code = device.ns["TuyaBLECode"].FUN_RECEIVE_TIME_DP
+    expected = [(12, 1700000000, 7), (13, 1700000060, 0), (12, 1700000120, 9)]
+
+    async def run():
+        for seq_num, (dp_id, timestamp, value) in enumerate(expected, 41):
+            time_bytes = (
+                str(timestamp * 1000).encode()
+                if time_type == 0
+                else pack(">I", timestamp)
+            )
+            payload = (
+                bytes([time_type])
+                + time_bytes
+                + bytes([dp_id, 2, 4])
+                + pack(">i", value)
+            )
+            parts = packets(
+                device, frame(device, payload, code=code.value, seq_num=seq_num)
+            )
+            device._notification_handler(0, parts[0])
+            await asyncio.sleep(0)
+            assert device._send_response.await_count == seq_num - 41
+            device._notification_handler(0, parts[1])
+            await asyncio.sleep(0)
+            device._send_response.assert_awaited_with(code, b"\x00", seq_num)
+        assert device._send_response.await_count == 3
+
+    asyncio.run(run())
+    assert [(dp[0], dp[1], dp[4]) for dp in records] == expected
+
+
+@pytest.mark.parametrize(
+    "payload,bad_crc",
+    [
+        (b"\x01\x00", False),
+        (b"\x01" + pack(">I", 1700000000) + b"\x0c\x02\x04\x00", False),
+        (b"\x01" + pack(">I", 1700000000) + b"\x0c\x02\x04\x00\x00\x00\x07", True),
+    ],
+)
+def test_invalid_timestamped_record_is_not_acknowledged(device, payload, bad_crc):
+    device._handle_command_or_response = type(
+        device
+    )._handle_command_or_response.__get__(device)
+    device._send_response = AsyncMock()
+    device._fire_callbacks = lambda updates: pytest.fail("Invalid record was published")
+
+    async def run():
+        send(device, frame(device, payload, code=0x8003, bad_crc=bad_crc))
+        await asyncio.sleep(0)
+        device._send_response.assert_not_awaited()
+
+    asyncio.run(run())
+    assert device._input_buffer is None

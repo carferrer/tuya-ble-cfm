@@ -1317,8 +1317,10 @@ class TuyaBLEDevice:
                 pos: int
                 timestamp, pos = self._parse_timestamp(data, 0)
                 self._parse_datapoints_v3(timestamp, 0, data, pos)
+                # A successful record ACK carries one status byte, not bytes(0)
+                # (which is empty). Keep response_to tied to this frame's sequence.
                 asyncio.create_task(
-                    self._send_response(code, bytes(0), seq_num))
+                    self._send_response(code, b"\x00", seq_num))
 
             case TuyaBLECode.FUN_RECEIVE_SIGN_TIME_DP:
                 if len(data) < 3:
