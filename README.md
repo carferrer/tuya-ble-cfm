@@ -23,6 +23,46 @@ The fork keeps only the platforms needed by these locks:
 - Sensor: DP21 `alarm_lock`
 - Battery: DP8 on `okkyfgfs`, DP9 `battery_state` on `b3aouluh`
 - RSSI diagnostic sensor
+- Access events and Last access timestamp on `b3aouluh`
+- Alarm events (DP21) on `b3aouluh`, separate from the existing Alarm sensor
+
+### Alarm events
+
+Both Access and Alarm events include an integer `event_type_id` for external
+archives such as MSSQL. These are fixed integration identifiers, not Tuya-issued
+record IDs: access types use their DP number (12, 13, 14, 15, 19, 55, 62, 63),
+and alarm types use 2100 + enum value (2100–2112 in the order below).
+The ID identifies a type, not an individual occurrence. Existing attributes,
+entity IDs, timestamps and deduplication keys are unchanged. The attribute is
+included with the next new event; previously seen records are not re-emitted.
+
+The `Alarm events` entity emits one event for each unseen DP21 alarm record,
+including records downloaded during a later BLE synchronization. Two failures of
+the same type with different lock timestamps produce two events. It makes no
+additional BLE connections and uses the existing connection policy and record
+recovery. Access events, their IDs, and their storage are unchanged.
+
+Supported event types, in DP21 enum order (0–12): `wrong_finger`,
+`wrong_password`, `wrong_card`, `wrong_face`, `tongue_bad`, `too_hot`,
+`unclosed_time`, `tongue_not_out`, `pry`, `key_in`, `low_battery`, `power_off`,
+`shock`. Cached `wrong_finger` and `wrong_password` records have been physically
+verified on `b3aouluh`; the remaining types emit when the lock reports them.
+The other model (`okkyfgfs`) is not enabled for this new entity pending testing.
+
+Event attributes include `event_type`, `dp_id`, `alarm_value`, `event_time`
+(original lock time, UTC), `received_at` (UTC), `delay_seconds`, and `recovered`
+(receipt more than two seconds after the lock timestamp). The entity's state is
+the time Home Assistant emits the event, not the original attempt time; this
+follows the [Home Assistant event entity API](https://developers.home-assistant.io/docs/core/entity/event/).
+Automations should trigger on this entity's state and read
+`trigger.to_state.attributes` to retain the data for each event in a batch.
+
+Deduplication retains the most recent 200 record keys per lock in separate
+persistent alarm storage. Reloads suppress records still in this window.
+Records already cached when the entity is first initialized establish a silent
+baseline; unseen records arriving afterwards emit normally, including old
+records recovered from the lock. Identical type/timestamp records cannot be
+distinguished, and records evicted from the deduplication window can emit again.
 
 ## BLE power saving
 
