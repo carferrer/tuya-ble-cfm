@@ -28,6 +28,14 @@ The fork keeps only the platforms needed by these locks:
 
 ### Alarm events
 
+Both Access and Alarm events include an integer `event_type_id` for external
+archives such as MSSQL. These are fixed integration identifiers, not Tuya-issued
+record IDs: access types use their DP number (12, 13, 14, 15, 19, 55, 62, 63),
+and alarm types use 2100 + enum value (2100–2112 in the order below).
+The ID identifies a type, not an individual occurrence. Existing attributes,
+entity IDs, timestamps and deduplication keys are unchanged. The attribute is
+included with the next new event; previously seen records are not re-emitted.
+
 The `Alarm events` entity emits one event for each unseen DP21 alarm record,
 including records downloaded during a later BLE synchronization. Two failures of
 the same type with different lock timestamps produce two events. It makes no

@@ -131,6 +131,7 @@ def entity(code, db=None, entry_id="lock1", records=None):
 def test_every_declared_alarm_retains_original_time_and_value(code, value, kind):
     record = code.alarm_record_from_datapoint(dp(value), 1790367340)
     assert record["event_type"] == kind
+    assert record["event_type_id"] == 2100 + value
     assert record["alarm_value"] == value
     assert record["event_time"] == "2026-09-25T20:13:42+00:00"
     assert record["received_at"] == "2026-09-25T20:15:40+00:00"
@@ -165,6 +166,27 @@ def test_all_thirteen_alarm_types_can_be_emitted(code):
     alarm._handle_updates([dp(value) for value in range(13)])
     assert [kind for kind, _ in alarm.emitted] == EXPECTED
     assert [data["alarm_value"] for _, data in alarm.emitted] == list(range(13))
+    assert [data["event_type_id"] for _, data in alarm.emitted] == list(range(2100, 2113))
+
+
+@pytest.mark.parametrize("dp_id", [12, 13, 14, 15, 19, 55, 62, 63])
+def test_access_type_id_is_additive_and_does_not_change_deduplication(code, dp_id):
+    ns = vars(code).copy()
+    load_code("access.py", ns)
+    load_code("event.py", ns)
+    record = ns["build_access_record"](dp_id, 200, 100, 110)
+    assert record["event_type_id"] == dp_id
+    legacy_record = {key: value for key, value in record.items() if key != "event_type_id"}
+    assert ns["access_record_key"](legacy_record) == ns["access_record_key"](record)
+    device = SimpleNamespace(device_id="lock1")
+    access = ns["TuyaBLEAccessEvent"]({}, SimpleNamespace(entry_id="lock1"), device)
+    access.emitted = []
+    access._process_record(record)
+    assert access.emitted[0][1]["event_type_id"] == dp_id
+    assert access.emitted[0][1]["access_value"] == 200
+    assert access.emitted[0][1]["member_id"] == 200
+    access._process_record(legacy_record)
+    assert len(access.emitted) == 1
 
 
 def test_repeated_failures_emit_individually_and_replays_do_not(code):

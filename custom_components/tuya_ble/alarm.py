@@ -60,6 +60,7 @@ def build_alarm_record(
     delay = max(0.0, received_timestamp - event_timestamp)
     return {
         "event_type": ALARM_OPTIONS[value],
+        "event_type_id": 2100 + value,
         "dp_id": 21,
         "alarm_value": value,
         "event_timestamp": float(event_timestamp),
