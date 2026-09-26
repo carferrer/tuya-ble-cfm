@@ -266,12 +266,12 @@ También quedan pendientes:
 
 ## Prueba experimental: botón interior de paso libre
 
-Los diagnósticos de una cerradura `b3aouluh` mostraron DP33 (`DT_BOOL`) y DP47 en `false` en estado normal, `true` con el botón interior en modo abierto y de nuevo `false` tras desactivarlo. DP33 cambió por BLE antes de la sincronización periódica. Esto identifica DP33 como candidato a estado de ese modo en el modelo probado, pero todavía no demuestra que admita escritura por Bluetooth. La referencia general de Tuya denomina DP33 «auto-locking»; el significado observado en esta cerradura requiere prueba física antes de asumir que la orden es equivalente al botón.
+Los diagnósticos de una cerradura `b3aouluh` mostraron DP33 (`DT_BOOL`) y DP47 en `false` en estado normal, `true` con el botón interior en modo abierto y de nuevo `false` tras desactivarlo. La prueba física posterior confirmó que encender y apagar DP33 desde HA cambia el modo de paso libre en esa cerradura. Las otras cerraduras `b3aouluh` aún requieren validación física.
 
-La rama experimental añade un interruptor **Passage mode (experimental)** solo para `b3aouluh`, **desactivado por defecto** en el registro de entidades. No cambia DP6, DP47, DP69, los eventos ni la política de conexiones. Para probarlo:
+La rama experimental añade un interruptor **Passage mode (experimental)** solo para `b3aouluh`, habilitado por defecto como entidad. No cambia DP6, DP47, DP69 ni la política de conexiones. Para comprobarlo en otra cerradura:
 
 1. Instala la rama experimental y reinicia Home Assistant.
-2. En **Ajustes → Dispositivos y servicios → Entidades**, busca el interruptor en la cerradura elegida y habilítalo únicamente para esa cerradura. Debe mostrar el estado reportado de DP33: apagado en normal, encendido al activar el botón interior. Si el estado no coincide, detén la prueba.
+2. En **Ajustes → Dispositivos y servicios → Entidades**, busca el interruptor en la cerradura elegida. Debe mostrar el estado reportado de DP33: apagado en normal, encendido al activar el botón interior. Si el estado no coincide, detén la prueba. Una entidad deshabilitada manualmente con anterioridad seguirá deshabilitada hasta volver a habilitarla.
 3. Con la cerradura a la vista y pudiendo volver a normal físicamente, enciende el interruptor en HA. Comprueba físicamente si queda en paso libre y si HA recibe DP33 `true`.
 4. Apágalo desde HA. Comprueba que vuelve a normal y que HA recibe DP33 `false`. Si no hay confirmación en 15 segundos, la acción mostrará un error; el efecto físico puede haber ocurrido igualmente, así que inspecciona la cerradura antes de repetirla.
 5. Guarda diagnósticos y los mensajes del registro para comparar DP33 y DP47.
