@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from homeassistant.components.binary_sensor import (
+    BinarySensorDeviceClass,
     BinarySensorEntity,
     BinarySensorEntityDescription,
 )
@@ -12,6 +13,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
+from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN
 from .devices import TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
@@ -67,6 +69,51 @@ class TuyaBLEBinarySensor(TuyaBLEEntity, BinarySensorEntity):
         self.async_write_ha_state()
 
 
+class TuyaBLEConnectionBinarySensor(TuyaBLEEntity, BinarySensorEntity):
+    """Show whether HA currently has a paired BLE session with this lock."""
+
+    def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass,
+            data.coordinator,
+            data.device,
+            data.product,
+            BinarySensorEntityDescription(
+                key="ble_connection",
+                name="Conexión Bluetooth",
+                device_class=BinarySensorDeviceClass.CONNECTIVITY,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+            "binary_sensor",
+        )
+        self._attr_is_on = data.device.connected
+
+    @property
+    def available(self) -> bool:
+        """Disconnected is a valid state, not an unavailable entity."""
+        return True
+
+    @callback
+    def _handle_connection_status(self) -> None:
+        connected = self._device.connected
+        if self._attr_is_on != connected:
+            self._attr_is_on = connected
+            self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._handle_connection_status()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self._device.register_connection_status_callback(
+                self._handle_connection_status
+            )
+        )
+        self._handle_connection_status()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -84,4 +131,5 @@ async def async_setup_entry(
         for item in get_mapping_by_device(data.device)
         if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)
     ]
+    entities.append(TuyaBLEConnectionBinarySensor(hass, data))
     async_add_entities(entities)
