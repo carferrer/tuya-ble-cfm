@@ -1,4 +1,4 @@
-"""Lock entity backed by the b3 motor state and the proven DP6 command."""
+"""Lock entity backed by each supported lock's motor state and DP6 command."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .button import async_press_bluetooth_unlock
 from .const import DOMAIN
-from .devices import PRODUCT_B3AOULUH, TuyaBLEData, TuyaBLEEntity
+from .devices import PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS, TuyaBLEData, TuyaBLEEntity
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType
 
 DP_MOTOR_STATE = 47
@@ -78,5 +78,5 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
-    if data.device.product_id == PRODUCT_B3AOULUH:
+    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS):
         async_add_entities([TuyaBLEMotorLock(hass, data)])
