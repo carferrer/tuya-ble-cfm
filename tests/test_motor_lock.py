@@ -81,3 +81,11 @@ def test_initial_state_uses_cached_motor_report_only():
     cache[47] = SimpleNamespace(id=47, type="bool", value=False)
     asyncio.run(entity.async_added_to_hass())
     assert entity._attr_is_locked is True
+
+
+def test_restored_state_wins_over_provisional_transport_cache():
+    entity, device, cache, _ = _lock()
+    cache[47] = SimpleNamespace(id=47, type="bool", value=True)
+    device._cfm_lock_state = SimpleNamespace(get=lambda dp_id: False)
+    asyncio.run(entity.async_added_to_hass())
+    assert entity._attr_is_locked is True

@@ -61,8 +61,24 @@ class TuyaBLEBinarySensor(TuyaBLEEntity, BinarySensorEntity):
         )
         self._mapping = mapping
 
+    @property
+    def available(self) -> bool:
+        """Keep the last known motor state visible during BLE power saving."""
+        return True
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        lock_state = getattr(self._device, "_cfm_lock_state", None)
+        if lock_state is not None and self._mapping.dp_id == 47:
+            self._attr_is_on = lock_state.get(47)
+
     @callback
     def _handle_coordinator_update(self) -> None:
+        lock_state = getattr(self._device, "_cfm_lock_state", None)
+        if lock_state is not None and self._mapping.dp_id == 47:
+            self._attr_is_on = lock_state.get(47)
+            self.async_write_ha_state()
+            return
         datapoint = self._device.datapoints[self._mapping.dp_id]
         if datapoint:
             self._attr_is_on = bool(datapoint.value)

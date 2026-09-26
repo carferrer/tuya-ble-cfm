@@ -45,6 +45,9 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
     @property
     def available(self) -> bool:
         """Only offer controls after the lock has reported a Boolean DP33."""
+        lock_state = getattr(self._device, "_cfm_lock_state", None)
+        if lock_state is not None and lock_state.get(DP_PASSAGE_MODE_CANDIDATE) is not None:
+            return True
         return self._device.datapoints.has_id(
             DP_PASSAGE_MODE_CANDIDATE, TuyaBLEDataPointType.DT_BOOL
         )
@@ -76,6 +79,10 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.async_on_remove(self._device.register_callback(self._handle_updates))
+        lock_state = getattr(self._device, "_cfm_lock_state", None)
+        if lock_state is not None:
+            self._attr_is_on = lock_state.get(DP_PASSAGE_MODE_CANDIDATE)
+            return
         dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
         if dp is not None and dp.type == TuyaBLEDataPointType.DT_BOOL:
             self._attr_is_on = bool(dp.value)
@@ -86,6 +93,9 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
 
         async with self._command_lock:
             dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
+            if dp is None:
+                await self._device.reconnect_and_update()
+                dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
             if dp is None or dp.type != TuyaBLEDataPointType.DT_BOOL:
                 raise HomeAssistantError("Lock has not reported a Boolean DP33")
             confirmation = asyncio.get_running_loop().create_future()

@@ -130,6 +130,16 @@ def test_default_enabled_and_status_from_device_report(code):
     assert device.callbacks == []
 
 
+def test_restored_passage_state_wins_over_provisional_transport_cache(code):
+    device = FakeDevice(initial=True)
+    device._cfm_lock_state = SimpleNamespace(get=lambda dp_id: False)
+    switch = make_switch(code, device)
+    assert switch.available is True
+    assert switch._attr_is_on is False
+    device.report(True)
+    assert switch._attr_is_on is True
+
+
 def test_command_waits_for_device_confirmation_and_can_reverse(code):
     device = FakeDevice()
     switch = make_switch(code, device)
