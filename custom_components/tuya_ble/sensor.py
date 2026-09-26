@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -160,6 +161,44 @@ class TuyaBLESensor(TuyaBLEEntity, SensorEntity):
                 else:
                     self._attr_native_value = datapoint.value
         self.async_write_ha_state()
+
+
+class TuyaBLEAlarmSensor(TuyaBLEEntity, RestoreSensor):
+    """Keep the most recently reported DP21 alarm across HA restarts."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: DataUpdateCoordinator,
+        device: TuyaBLEDevice,
+        product: TuyaBLEProductInfo,
+        mapping: TuyaBLESensorMapping,
+    ) -> None:
+        super().__init__(hass, coordinator, device, product, mapping.description)
+        self._mapping = mapping
+
+    @property
+    def available(self) -> bool:
+        """A last-known alarm remains useful while BLE is disconnected."""
+        return self.native_value is not None or self._coordinator.connected
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        TuyaBLESensor._handle_coordinator_update(self)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        last_data = await self.async_get_last_sensor_data()
+        if self._device.datapoints[self._mapping.dp_id] is not None:
+            self._handle_coordinator_update()
+            return
+        if (
+            self.native_value is None
+            and last_data is not None
+            and last_data.native_value in ALARM_OPTIONS
+        ):
+            self._attr_native_value = last_data.native_value
+            self.async_write_ha_state()
 
 
 class TuyaBLELastAccessSensor(SensorEntity):
@@ -321,7 +360,7 @@ async def async_setup_entry(
         )
     ]
     entities.extend(
-        TuyaBLESensor(
+        (TuyaBLEAlarmSensor if item.dp_id == 21 else TuyaBLESensor)(
             hass,
             data.coordinator,
             data.device,
