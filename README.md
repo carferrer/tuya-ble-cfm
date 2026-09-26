@@ -22,7 +22,7 @@ Se han probado físicamente la recuperación de varias aperturas, los accesos po
 | Product ID | Modelo / categoría | Funciones básicas | Eventos Access / Alarm events y recuperación DP69 |
 | --- | --- | --- | --- |
 | `b3aouluh` | Smart Lock / `jtmspro` | Sí | Sí |
-| `okkyfgfs` | P196_V / `ms` | Sí | Access y varias notificaciones de alarma probados; recuperación completa y DP69 no confirmados |
+| `okkyfgfs` | P196_V / `ms` | Sí | Aperturas acumuladas recuperadas en las pruebas; alarmas de entrega irregular, también en Tuya; DP69 no confirmado |
 
 La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. La compatibilidad de otros productos Tuya no está garantizada.
 
@@ -113,6 +113,16 @@ Los registros pueden llegar del más reciente al más antiguo. Por eso:
 - `received_at` indica cuándo lo recibió la integración.
 - `Last access` conserva la mayor fecha de apertura, aunque llegue después un registro más antiguo.
 - El estado de una entidad `event.*` es la hora de emisión en Home Assistant; para archivar el suceso se debe usar `event_time`.
+
+### Limitación conocida: alarmas de `okkyfgfs`
+
+En la cerradura `okkyfgfs` de esta instalación se ha observado una entrega irregular de alarmas DP21, también al utilizar la app oficial de Tuya. Por tanto, **no se garantiza recibir ni recuperar todas las alarmas**. Esto apunta a una limitación de la cerradura o de su firmware, aunque no se ha determinado la causa exacta.
+
+En la prueba con conexión continua llegaron las tres alarmas provocadas (huella incorrecta, código incorrecto y huella incorrecta). En otra prueba, con HA desconectado, se provocaron cinco fallos y una apertura válida: al reconectar solo se recibió la primera alarma y la apertura. Las aperturas acumuladas se han recuperado correctamente en las pruebas realizadas.
+
+La integración procesa los registros que recibe y aplica su protección contra duplicados. Las alarmas de este modelo deben tratarse como avisos complementarios, no como un historial completo de todos los intentos fallidos. La recepción de eventos antiguos en conexiones posteriores, incluso tras reiniciar HA, debe interpretarse mediante `event_time` (hora del suceso) y `received_at` (hora de recepción).
+
+Esta investigación queda cerrada por ahora como una limitación conocida. Esta observación corresponde a la unidad `okkyfgfs` probada; la recuperación de aperturas y alarmas mediante DP69 sigue validada para las `b3aouluh`.
 
 ### Protección contra duplicados
 
@@ -272,7 +282,7 @@ Se han observado fallos `starting notifications failed`, `GATT Error 133`, desco
 
 También quedan pendientes:
 
-- Validar la nueva entidad `lock` de `okkyfgfs` y el alcance de la recuperación de registros al reconectar. El botón DP6 `raw`, los eventos de apertura y varias notificaciones de alarma ya se han probado. No se asume que use DP69.
+- Validar la nueva entidad `lock` de `okkyfgfs`. El botón DP6 `raw` y la recuperación de aperturas acumuladas ya se han probado. La entrega irregular de alarmas se documenta arriba como limitación conocida; no se asume que use DP69.
 - Verificar la correspondencia numérica de `low_battery` en DP21 de `okkyfgfs`: el modelo declara tres opciones, pero su descripción utiliza la enumeración general de alarmas.
 - Identificar, si existe, un comando de paso libre para `okkyfgfs`. Su modelo declara DP47 como solo lectura y no incluye un control específico de paso libre.
 - Probar físicamente los métodos de apertura y alarmas aún no ensayados.
