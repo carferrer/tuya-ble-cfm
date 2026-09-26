@@ -64,11 +64,11 @@ class TuyaBLEMotorLock(TuyaBLEEntity, LockEntity):
             self._attr_is_locked = not dp.value
 
     async def async_lock(self, **kwargs) -> None:
-        """Send the same DP6 command as the existing Open button."""
+        """Send the model's tested double DP6 command, also for okky."""
         await async_press_bluetooth_unlock(self._device)
 
     async def async_unlock(self, **kwargs) -> None:
-        """Send the same DP6 command as the existing Open button."""
+        """Send the model's tested double DP6 command, also for okky."""
         await async_press_bluetooth_unlock(self._device)
 
 

@@ -35,8 +35,10 @@ UNLOCK_PULSE_SECONDS = 0.5
 OKKY_UNLOCK_PAYLOAD = b"\x01\x01"
 
 
-async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
-    """Send the existing DP6 command, shared by the button and lock entity."""
+async def async_press_bluetooth_unlock(
+    device: TuyaBLEDevice, *, single_okky_write: bool = False
+) -> None:
+    """Send DP6, optionally testing one raw write from the okky button only."""
     command_lock = getattr(device, "_cfm_unlock_command_lock", None)
     if command_lock is None:
         command_lock = device._cfm_unlock_command_lock = asyncio.Lock()
@@ -58,8 +60,9 @@ async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
             if datapoint.type != TuyaBLEDataPointType.DT_RAW:
                 raise HomeAssistantError("Expected a raw DP6 on okkyfgfs")
             await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
-            await asyncio.sleep(UNLOCK_PULSE_SECONDS)
-            await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
+            if not single_okky_write:
+                await asyncio.sleep(UNLOCK_PULSE_SECONDS)
+                await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
 
 mapping = {
     "ms": {"okkyfgfs": LOCK_BUTTONS},
@@ -93,8 +96,8 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
         return True
 
     async def async_press(self) -> None:
-        """Send the physically tested DP6 pulse on b3 locks."""
-        await async_press_bluetooth_unlock(self._device)
+        """Keep the b3 pulse and test one raw write from the okky button."""
+        await async_press_bluetooth_unlock(self._device, single_okky_write=True)
 
 
 class TuyaBLERefreshButton(TuyaBLEEntity, ButtonEntity):
