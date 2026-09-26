@@ -214,10 +214,11 @@ def test_switch_platform_is_not_loaded_for_other_lock():
         BUTTON = 1
         SENSOR = 2
         SWITCH = 3
+        LOCK = 4
 
     ns = {
         "Platform": Platform,
-        "PLATFORMS": [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH],
+        "PLATFORMS": [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH, Platform.LOCK],
         "PRODUCT_B3AOULUH": "b3aouluh",
     }
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "__init__.py", "exec",

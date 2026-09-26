@@ -44,6 +44,7 @@ def load_class(namespace, filename, name, bases=None):
     [
         ("button", "TuyaBLEButton", "bluetooth_unlock"),
         ("binary_sensor", "TuyaBLEBinarySensor", "lock_motor_state"),
+        ("lock", "TuyaBLEMotorLock", "motor_lock"),
         ("select", "TuyaBLESelect", "beep_volume"),
         ("sensor", "TuyaBLESensor", "alarm_lock"),
     ],
@@ -66,15 +67,22 @@ def test_platform_constructors_preserve_unique_id_and_suggest_correct_domain(
         "CoordinatorEntity": CoordinatorEntity,
         "generate_entity_id": generate_entity_id,
         "get_device_info": lambda device: {},
+        "LockEntityDescription": lambda **kwargs: SimpleNamespace(translation_key=None, **kwargs),
     }
     load_class(namespace, "devices.py", "TuyaBLEEntity")
     entity_cls = load_class(namespace, platform + ".py", name, ["TuyaBLEEntity"])
     description = SimpleNamespace(key=key, translation_key=None, options=[])
     device = SimpleNamespace(device_id="unchanged-device")
     hass = object()
-    entity = entity_cls(
-        hass, None, device, None, SimpleNamespace(description=description, options=[])
-    )
+    if platform == "lock":
+        entity = entity_cls(
+            hass,
+            SimpleNamespace(coordinator=None, device=device, product=None),
+        )
+    else:
+        entity = entity_cls(
+            hass, None, device, None, SimpleNamespace(description=description, options=[])
+        )
     assert entity._attr_unique_id == "unchanged-device-" + key
     assert calls == [(platform + ".{}", entity._attr_unique_id, hass)]
     assert entity.entity_id.startswith(platform + ".")

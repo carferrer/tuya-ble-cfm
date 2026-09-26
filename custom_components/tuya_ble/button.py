@@ -32,6 +32,24 @@ LOCK_BUTTONS = [
 ]
 UNLOCK_PULSE_SECONDS = 0.5
 
+
+async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
+    """Send the existing DP6 command, shared by the button and lock entity."""
+    command_lock = getattr(device, "_cfm_unlock_command_lock", None)
+    if command_lock is None:
+        command_lock = device._cfm_unlock_command_lock = asyncio.Lock()
+
+    async with command_lock:
+        datapoint = device.datapoints.get_or_create(
+            6, TuyaBLEDataPointType.DT_BOOL, False
+        )
+        if device.product_id == PRODUCT_B3AOULUH:
+            await datapoint.set_value(True)
+            await asyncio.sleep(UNLOCK_PULSE_SECONDS)
+            await datapoint.set_value(False)
+        else:
+            await datapoint.set_value(not bool(datapoint.value))
+
 mapping = {
     "ms": {"okkyfgfs": LOCK_BUTTONS},
     "jtmspro": {"b3aouluh": LOCK_BUTTONS},
@@ -57,7 +75,6 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
             hass, coordinator, device, product, mapping.description, "button"
         )
         self._mapping = mapping
-        self._press_lock = asyncio.Lock()
 
     @property
     def available(self) -> bool:
@@ -66,18 +83,7 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Send the physically tested DP6 pulse on b3 locks."""
-        async with self._press_lock:
-            datapoint = self._device.datapoints.get_or_create(
-                self._mapping.dp_id,
-                TuyaBLEDataPointType.DT_BOOL,
-                False,
-            )
-            if self._device.product_id == PRODUCT_B3AOULUH:
-                await datapoint.set_value(True)
-                await asyncio.sleep(UNLOCK_PULSE_SECONDS)
-                await datapoint.set_value(False)
-            else:
-                await datapoint.set_value(not bool(datapoint.value))
+        await async_press_bluetooth_unlock(self._device)
 
 
 class TuyaBLERefreshButton(TuyaBLEEntity, ButtonEntity):

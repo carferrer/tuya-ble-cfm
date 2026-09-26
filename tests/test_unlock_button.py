@@ -35,6 +35,7 @@ class FakeDatapoint:
 def _button(product="b3aouluh", initial=False, fail_first=False):
     source = ast.parse(BUTTON.read_text(encoding="utf-8"))
     cls = next(node for node in source.body if isinstance(node, ast.ClassDef) and node.name == "TuyaBLEButton")
+    helper = next(node for node in source.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "async_press_bluetooth_unlock")
     cls.bases = [ast.Name(id="FakeBase", ctx=ast.Load())]
     delays = []
 
@@ -48,7 +49,7 @@ def _button(product="b3aouluh", initial=False, fail_first=False):
         "TuyaBLEDataPointType": SimpleNamespace(DT_BOOL="bool"),
         "UNLOCK_PULSE_SECONDS": 0.5,
     }
-    module = ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[]))
+    module = ast.fix_missing_locations(ast.Module(body=[helper, cls], type_ignores=[]))
     exec(compile(module, str(BUTTON), "exec", flags=__import__("__future__").annotations.compiler_flag), namespace)
     datapoint = FakeDatapoint(initial, fail_first)
     datapoints = SimpleNamespace(get_or_create=lambda *args: datapoint)
