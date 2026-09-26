@@ -30,6 +30,9 @@
     },
     "entity": {
         "binary_sensor": {
+            "ble_connection": {
+                "name": "Conexión Bluetooth"
+            },
             "low_battery": {
                 "name": "Battery"
             },

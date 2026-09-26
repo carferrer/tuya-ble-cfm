@@ -77,6 +77,7 @@ def enable_lock_power_saver(
                 self._expected_disconnect = False
                 self._is_paired = False
                 self._lock_power_saver_idle_disconnecting = False
+                self._fire_connection_status_callbacks()
         except asyncio.CancelledError:
             pass
 

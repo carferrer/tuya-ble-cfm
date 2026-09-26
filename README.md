@@ -57,6 +57,7 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, ambas familias |
 | Selector `beep_volume` | DP31, volumen |
 | Sensor binario `lock_motor_state` | DP47, estado del motor |
+| Sensor binario `ble_connection` | Sesión Bluetooth emparejada activa con HA, ambas familias |
 | Sensor `Alarm` | DP21, último valor de alarma recibido |
 | Batería | DP8 en `okkyfgfs`; DP9 `battery_state` en `b3aouluh` |
 | RSSI | Diagnóstico de señal |
@@ -75,9 +76,13 @@ En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 50
 
 La entidad `lock` de `b3aouluh` muestra `locked` cuando el último DP47 Booleano recibido es `false` y `unlocked` cuando es `true`. Sin lectura previa, muestra `unknown`. Las acciones **Bloquear** y **Desbloquear** envían exactamente la misma secuencia DP6 que el botón, sin cambiar el estado de forma optimista: solo un nuevo DP47 puede actualizarlo. El comando DP6 no garantiza que **Bloquear** cierre el modo de paso libre; para eso se usa el interruptor `Modo paso libre`. Como la cerradura se desconecta para ahorrar batería, el estado visible es la última lectura conocida y puede quedar desactualizado hasta la próxima conexión o al pulsar `Actualizar cerradura`.
 
+Al reiniciar HA, `lock`, `lock_motor_state` y `Modo paso libre` recuperan el último DP47 o DP33 Booleano recibido de la cerradura. Una lectura nueva sustituye el valor guardado; los valores provisionales de la caché BLE y las escrituras enviadas desde HA no lo sustituyen. En la primera instalación de esta versión todavía no hay valor guardado y puede verse `unknown` hasta la primera conexión. El estado del motor se conserva en ambas familias; `lock` y `Modo paso libre` siguen siendo exclusivos de `b3aouluh`.
+
 El interruptor Modo paso libre refleja el DP33 confirmado por la cerradura. Habilitar la entidad no activa físicamente el modo. Las entidades deshabilitadas por defecto en la versión experimental se habilitan al cargar la integración; una deshabilitación manual del usuario se respeta. Se conserva el mismo `unique_id` y `entity_id`. El evento `Access` emite `passage_mode_enabled` (`event_type_id: 33`) solo cuando DP33 pasa de desactivado a activado. No se emite al cerrarlo, con informes repetidos ni al arrancar HA con el modo ya activado. La hora del evento es la de recepción en HA; no es un registro histórico de apertura.
 
 `Last connected` conserva durante la desconexión la hora de la última conexión BLE emparejada vista por este proceso de HA. Tras un reinicio empieza sin valor hasta la siguiente conexión. `Update interval` muestra los minutos configurados en modo periódico; muestra 0 en los modos bajo demanda, detección de actividad y keep-alive. Ninguno de estos sensores abre conexiones BLE adicionales. El botón `Actualizar cerradura` fuerza una conexión y una lectura de estado únicamente cuando se pulsa; la conexión vuelve a seguir el modo de ahorro configurado.
+
+`ble_connection` es un sensor de diagnóstico que muestra `on` solo mientras HA tiene una sesión BLE emparejada con la cerradura. Muestra `off` al desconectarse por ahorro de batería o por pérdida del enlace. No mide si la cerradura sigue cerca o anuncia por Bluetooth, y no inicia conexiones adicionales.
 
 ## Conexión y ahorro de batería
 

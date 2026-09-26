@@ -23,6 +23,7 @@ from .cloud import HASSTuyaBLEDeviceManager
 from .const import DOMAIN
 from .devices import TuyaBLECoordinator, TuyaBLEData, get_device_product_info
 from .lock_power_saver import enable_lock_power_saver
+from .lock_state import TuyaBLELockState
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
@@ -96,6 +97,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         raise ConfigEntryNotReady(
             f"Unsupported Tuya BLE lock {device.category}/{device.product_id}"
         )
+
+    lock_state = TuyaBLELockState(hass, entry.entry_id, device)
+    await lock_state.async_load()
+    lock_state.register()
+    device._cfm_lock_state = lock_state
+    entry.async_on_unload(lock_state.unregister)
 
     coordinator = TuyaBLECoordinator(hass, device)
 

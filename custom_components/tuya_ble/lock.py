@@ -49,6 +49,12 @@ class TuyaBLEMotorLock(TuyaBLEEntity, LockEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.async_on_remove(self._device.register_callback(self._handle_updates))
+        lock_state = getattr(self._device, "_cfm_lock_state", None)
+        if lock_state is not None:
+            value = lock_state.get(DP_MOTOR_STATE)
+            if value is not None:
+                self._attr_is_locked = not value
+            return
         dp = self._device.datapoints[DP_MOTOR_STATE]
         if (
             dp is not None
