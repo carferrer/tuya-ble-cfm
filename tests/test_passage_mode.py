@@ -179,3 +179,31 @@ def test_setup_only_adds_control_for_b3(code):
             hass, SimpleNamespace(entry_id="entry"), added.extend
         ))
         assert len(added) == expected
+
+
+def test_switch_platform_is_not_loaded_for_other_lock():
+    tree = ast.parse((ROOT / "__init__.py").read_text(encoding="utf-8"))
+    fn = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_platforms_for_device"
+    )
+    class Platform(Enum):
+        BUTTON = 1
+        SENSOR = 2
+        SWITCH = 3
+
+    ns = {
+        "Platform": Platform,
+        "PLATFORMS": [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH],
+        "PRODUCT_B3AOULUH": "b3aouluh",
+    }
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), "__init__.py", "exec",
+                 flags=__import__("__future__").annotations.compiler_flag), ns)
+    select = ns["_platforms_for_device"]
+    assert select(SimpleNamespace(product_id="b3aouluh")) == ns["PLATFORMS"]
+    assert select(SimpleNamespace(product_id="okkyfgfs")) == [
+        Platform.BUTTON, Platform.SENSOR
+    ]
+    source = (ROOT / "__init__.py").read_text(encoding="utf-8")
+    assert "entry, _platforms_for_device(device)" in source
+    assert "entry, _platforms_for_device(data.device)" in source
