@@ -22,7 +22,7 @@ Se han probado físicamente la recuperación de varias aperturas, los accesos po
 | Product ID | Modelo / categoría | Funciones básicas | Eventos Access / Alarm events y recuperación DP69 |
 | --- | --- | --- | --- |
 | `b3aouluh` | Smart Lock / `jtmspro` | Sí | Sí |
-| `okkyfgfs` | P196_V / `ms` | Sí | Pendientes de validar y adaptar |
+| `okkyfgfs` | P196_V / `ms` | Sí | Access y Alarm events preparados para prueba física; DP69 no confirmado |
 
 La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. La compatibilidad de otros productos Tuya no está garantizada.
 
@@ -61,9 +61,9 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Sensor `Alarm` | DP21, último valor de alarma recibido |
 | Batería | DP8 en `okkyfgfs`; DP9 `battery_state` en `b3aouluh` |
 | RSSI | Diagnóstico de señal |
-| Evento `Access` | Aperturas, solo `b3aouluh` |
-| Sensor `Last access` | Hora de la apertura más reciente, solo `b3aouluh` |
-| Evento `Alarm events` | Registros individuales DP21, solo `b3aouluh` |
+| Evento `Access` | Aperturas DP12/13/14/15/19/55/62/63, ambas familias si la cerradura los reporta |
+| Sensor `Last access` | Hora de la apertura más reciente, ambas familias |
+| Evento `Alarm events` | Registros individuales DP21, ambas familias |
 | Interruptor `Modo paso libre` | DP33, solo `b3aouluh`; entidad habilitada por defecto |
 | Sensor `Last connected` | Última conexión BLE emparejada, ambas familias |
 | Sensor `Update interval` | Intervalo periódico en minutos; 0 en los otros modos, ambas familias |
@@ -72,7 +72,7 @@ El sensor `Alarm` muestra un estado. `Alarm events` permite reaccionar a cada re
 
 El sensor `alarm_lock` guarda por cerradura su último valor DP21 válido y lo recupera tras reiniciar HA. Al actualizar desde una versión anterior, también puede tomar el último registro de alarma que la integración ya había archivado localmente. Una nueva lectura DP21 tiene prioridad sobre el valor guardado. La recuperación no abre una conexión BLE ni vuelve a emitir eventos; hasta recibir una lectura nueva, el estado mostrado es el último conocido. Si una cerradura nunca ha comunicado una alarma y no hay registro previo, el sensor seguirá sin valor hasta el primer DP21.
 
-En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 500 ms tras completar esa escritura y envía DP6 `false`. Esto reproduce la doble pulsación que funcionó en la instalación, sin necesitar una automatización. El botón puede iniciar la conexión BLE aunque la cerradura esté desconectada; si falla la primera escritura, no envía la segunda. `okkyfgfs` conserva el comando DP6 único previo hasta validarlo físicamente.
+En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 500 ms tras completar esa escritura y envía DP6 `false`. Esto reproduce la doble pulsación que funcionó en la instalación, sin necesitar una automatización. En `okkyfgfs`, DP6 es `raw`: la prueba envía dos veces `01 01` (orden de apertura e ID de miembro 1 del ejemplo facilitado), con 500 ms entre escrituras. Este formato sigue pendiente de validación física en esa cerradura. El botón puede iniciar la conexión BLE aunque la cerradura esté desconectada; si falla la primera escritura, no envía la segunda.
 
 La entidad `lock` de `b3aouluh` muestra `locked` cuando el último DP47 Booleano recibido es `false` y `unlocked` cuando es `true`. Sin lectura previa, muestra `unknown`. Las acciones **Bloquear** y **Desbloquear** envían exactamente la misma secuencia DP6 que el botón, sin cambiar el estado de forma optimista: solo un nuevo DP47 puede actualizarlo. El comando DP6 no garantiza que **Bloquear** cierre el modo de paso libre; para eso se usa el interruptor `Modo paso libre`. Como la cerradura se desconecta para ahorrar batería, el estado visible es la última lectura conocida y puede quedar desactualizado hasta la próxima conexión o al pulsar `Actualizar cerradura`.
 
@@ -272,7 +272,7 @@ Se han observado fallos `starting notifications failed`, `GATT Error 133`, desco
 
 También quedan pendientes:
 
-- Obtener y validar los DP de eventos de la otra cerradura, `okkyfgfs`.
+- Validar físicamente en `okkyfgfs` los eventos DP12/13/19/21, el comando DP6 `raw` y si entrega registros pendientes al reconectar. No se asume que use DP69.
 - Probar físicamente los métodos de apertura y alarmas aún no ensayados.
 - Medir la autonomía real con los distintos intervalos de conexión.
 - Implementar, si se necesita, el envío externo a MSSQL.

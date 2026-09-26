@@ -33,6 +33,7 @@ from .connection_policy import CONNECTION_MODE_PERIODIC_SYNC, connection_mode, s
 from .const import DOMAIN
 from .devices import (
     PRODUCT_B3AOULUH,
+    PRODUCT_OKKYFGFS,
     TuyaBLEData,
     TuyaBLEEntity,
     TuyaBLEProductInfo,
@@ -408,6 +409,6 @@ async def async_setup_entry(
                         hass, data.coordinator, data.device, data.product, item
                     )
                 )
-    if data.device.product_id == PRODUCT_B3AOULUH:
+    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS):
         entities.append(TuyaBLELastAccessSensor(hass, entry, data.device))
     async_add_entities(entities)

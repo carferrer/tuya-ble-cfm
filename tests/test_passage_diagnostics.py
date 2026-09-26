@@ -24,6 +24,7 @@ def _method(filename: str, class_name: str, method_name: str, namespace: dict):
 def test_passage_event_only_on_observed_closed_to_open_transition():
     dp_type = SimpleNamespace(DT_BOOL="bool")
     namespace = {
+        "PRODUCT_B3AOULUH": "b3aouluh",
         "DP_PASSAGE_MODE": 33,
         "EVENT_PASSAGE_MODE_ENABLED": "passage_mode_enabled",
         "TuyaBLEDataPointType": dp_type,
@@ -36,6 +37,7 @@ def test_passage_event_only_on_observed_closed_to_open_transition():
     handle = _method("event.py", "TuyaBLEAccessEvent", "_handle_updates", namespace)
     events = []
     entity = SimpleNamespace(
+        _device=SimpleNamespace(product_id="b3aouluh"),
         _passage_mode=None,
         _ready=True,
         _pending_passage_open=False,
