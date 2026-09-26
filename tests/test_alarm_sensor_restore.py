@@ -56,23 +56,40 @@ def _alarm_sensor_class():
         async def async_get_last_state(self):
             return self._restored_state
 
+    class FakeStore:
+        def __init__(self, hass, version, key):
+            self.db = hass
+            self.key = key
+
+        async def async_load(self):
+            return self.db.get(self.key)
+
+        def async_delay_save(self, callback, delay):
+            self.db[self.key] = callback()
+
     ns = {
         "TuyaBLEEntity": FakeBase,
         "RestoreSensor": FakeRestoreSensor,
+        "Store": FakeStore,
         "TuyaBLEDataPointType": DPType,
         "ALARM_OPTIONS": ["wrong_finger", "wrong_password"],
+        "ALARM_SENSOR_STORE_VERSION": 1,
+        "ALARM_STORE_VERSION": 1,
+        "alarm_sensor_store_key": lambda entry_id: f"sensor.{entry_id}",
+        "alarm_store_key": lambda entry_id: f"events.{entry_id}",
     }
     module = ast.fix_missing_locations(ast.Module(body=[generic, alarm], type_ignores=[]))
     exec(compile(module, str(SENSOR), "exec", flags=__import__("__future__").annotations.compiler_flag), ns)
     return ns["TuyaBLEAlarmSensor"]
 
 
-def _sensor(current_dp=None, restored="wrong_finger", legacy_state=None):
+def _sensor(current_dp=None, restored="wrong_finger", legacy_state=None, db=None):
     cls = _alarm_sensor_class()
     coordinator = SimpleNamespace(connected=False)
     device = SimpleNamespace(datapoints={21: current_dp})
     mapping = SimpleNamespace(dp_id=21, coefficient=1, getter=None, description=SimpleNamespace(options=["wrong_finger", "wrong_password"]))
-    sensor = cls(None, coordinator, device, None, mapping)
+    db = {} if db is None else db
+    sensor = cls(db, SimpleNamespace(entry_id="entry"), coordinator, device, None, mapping)
     sensor._restored_data = None if restored is None else SimpleNamespace(native_value=restored)
     sensor._restored_state = None if legacy_state is None else SimpleNamespace(state=legacy_state)
     return sensor, coordinator, device
@@ -109,3 +126,23 @@ def test_first_upgrade_restores_previous_visible_state():
     sensor, coordinator, device = _sensor(restored=None, legacy_state="wrong_password")
     asyncio.run(sensor.async_added_to_hass())
     assert sensor.native_value == "wrong_password"
+
+
+def test_alarm_event_store_recovers_value_when_ha_restore_is_unknown():
+    db = {"events.entry": {"last_record": {"event_type": "wrong_password"}}}
+    sensor, coordinator, device = _sensor(restored=None, legacy_state="unknown", db=db)
+    asyncio.run(sensor.async_added_to_hass())
+    assert sensor.native_value == "wrong_password"
+    assert db["sensor.entry"] == {"value": "wrong_password"}
+
+
+def test_sensor_store_survives_subsequent_restart_without_ha_restore():
+    db = {}
+    sensor, coordinator, device = _sensor(restored=None, db=db)
+    device.datapoints[21] = SimpleNamespace(type=DPType.DT_ENUM, value=1)
+    sensor._handle_coordinator_update()
+    assert db["sensor.entry"] == {"value": "wrong_password"}
+
+    next_sensor, coordinator, device = _sensor(restored=None, db=db)
+    asyncio.run(next_sensor.async_added_to_hass())
+    assert next_sensor.native_value == "wrong_password"
