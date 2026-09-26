@@ -26,6 +26,8 @@ EVENT_BLE_UNLOCK = "ble_unlock"
 EVENT_TEMPORARY_PASSWORD_UNLOCK = "temporary_password_unlock"
 EVENT_PHONE_REMOTE_UNLOCK = "phone_remote_unlock"
 EVENT_VOICE_REMOTE_UNLOCK = "voice_remote_unlock"
+EVENT_PASSAGE_MODE_ENABLED = "passage_mode_enabled"
+DP_PASSAGE_MODE = 33
 
 # Tuya function definition for b3aouluh declares these unlock records as
 # DT_VALUE datapoints. Fingerprint (DP12) and password (DP13) have been
@@ -46,7 +48,7 @@ ACCESS_RECORD_TYPES = {
 }
 ACCESS_EVENT_TYPES = [
     event_type for event_type, _method in ACCESS_RECORD_TYPES.values()
-]
+] + [EVENT_PASSAGE_MODE_ENABLED]
 ACCESS_RECORD_REPLAY_DELAY = 2.0
 ACCESS_STORE_VERSION = 1
 ACCESS_STORE_MAX_KEYS = 200

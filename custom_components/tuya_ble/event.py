@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections import deque
+from datetime import UTC, datetime
+import time
 from typing import Any
 
 from homeassistant.components.event import EventEntity
@@ -15,6 +17,8 @@ from .access import (
     ACCESS_EVENT_TYPES,
     ACCESS_STORE_MAX_KEYS,
     ACCESS_STORE_VERSION,
+    DP_PASSAGE_MODE,
+    EVENT_PASSAGE_MODE_ENABLED,
     access_record_from_datapoint,
     access_record_key,
     access_store_key,
@@ -24,7 +28,7 @@ from .alarm_event import TuyaBLEAlarmEvent
 from .connection_policy import setup_connection_policy
 from .const import DOMAIN
 from .devices import PRODUCT_B3AOULUH, TuyaBLEData, get_device_info
-from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDevice
+from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 
 class TuyaBLEAccessEvent(EventEntity):
@@ -51,6 +55,8 @@ class TuyaBLEAccessEvent(EventEntity):
         self._last_record: dict[str, Any] | None = None
         self._ready = False
         self._queued_records: list[dict[str, Any]] = []
+        self._passage_mode: bool | None = None
+        self._pending_passage_open = False
         self._attr_unique_id = f"{device.device_id}-access"
         self._attr_device_info = get_device_info(device)
 
@@ -105,9 +111,39 @@ class TuyaBLEAccessEvent(EventEntity):
             self._emit_record(record)
 
     @callback
+    def _emit_passage_mode_enabled(self) -> None:
+        """Report the observed transition into passage mode once."""
+        received_at = datetime.fromtimestamp(time.time(), UTC).isoformat()
+        self._trigger_event(
+            EVENT_PASSAGE_MODE_ENABLED,
+            {
+                "event_type_id": DP_PASSAGE_MODE,
+                "method": "passage_mode",
+                "dp_id": DP_PASSAGE_MODE,
+                "event_time": received_at,
+                "received_at": received_at,
+                "recovered": False,
+            },
+        )
+        self.async_write_ha_state()
+
+    @callback
     def _handle_updates(self, updates: list[TuyaBLEDataPoint]) -> None:
         """Handle live or replayed access datapoints from the BLE transport."""
         for datapoint in updates:
+            if (
+                datapoint.id == DP_PASSAGE_MODE
+                and datapoint.type == TuyaBLEDataPointType.DT_BOOL
+                and type(datapoint.value) is bool
+            ):
+                was_enabled = self._passage_mode
+                self._passage_mode = datapoint.value
+                if was_enabled is False and datapoint.value:
+                    if self._ready:
+                        self._emit_passage_mode_enabled()
+                    else:
+                        self._pending_passage_open = True
+                continue
             record = access_record_from_datapoint(datapoint)
             if record is None:
                 continue
@@ -120,6 +156,13 @@ class TuyaBLEAccessEvent(EventEntity):
         """Load deduplication state and subscribe to Tuya BLE records."""
         await super().async_added_to_hass()
         self.async_on_remove(self._device.register_callback(self._handle_updates))
+        passage_dp = self._device.datapoints[DP_PASSAGE_MODE]
+        if (
+            passage_dp is not None
+            and passage_dp.type == TuyaBLEDataPointType.DT_BOOL
+            and type(passage_dp.value) is bool
+        ):
+            self._passage_mode = passage_dp.value
 
         stored = await self._store.async_load()
         history = list(
@@ -155,6 +198,9 @@ class TuyaBLEAccessEvent(EventEntity):
         self._queued_records = []
         for record in queued:
             self._process_record(record)
+        if self._pending_passage_open:
+            self._pending_passage_open = False
+            self._emit_passage_mode_enabled()
 
 
 async def _async_connection_options_updated(

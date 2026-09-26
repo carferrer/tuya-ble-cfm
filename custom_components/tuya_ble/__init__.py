@@ -30,10 +30,18 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.SELECT,
     Platform.EVENT,
+    Platform.SWITCH,
 ]
 
 PRODUCT_B3AOULUH = "b3aouluh"
 PRODUCT_OKKYFGFS = "okkyfgfs"
+
+
+def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
+    """Load the experimental DP33 control only for the b3 lock family."""
+    if device.product_id == PRODUCT_B3AOULUH:
+        return PLATFORMS
+    return [platform for platform in PLATFORMS if platform != Platform.SWITCH]
 
 # b3aouluh idle advertising can mimic the short cadence previously used to
 # catch event-like DP47 quickly. Cached-record recovery via DP69 means we no
@@ -401,7 +409,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator,
     )
 
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    await hass.config_entries.async_forward_entry_setups(
+        entry, _platforms_for_device(device)
+    )
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
 
     async def _async_stop(event: Event) -> None:
@@ -423,8 +433,11 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload Tuya BLE entry."""
-    if unload_ok := await hass.config_entries.async_unload_platforms(entry, PLATFORMS):
-        data: TuyaBLEData = hass.data[DOMAIN].pop(entry.entry_id)
+    data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
+    if unload_ok := await hass.config_entries.async_unload_platforms(
+        entry, _platforms_for_device(data.device)
+    ):
+        hass.data[DOMAIN].pop(entry.entry_id)
         await data.device.stop()
 
     return unload_ok

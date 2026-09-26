@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
@@ -11,7 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .devices import TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
+from .devices import PRODUCT_B3AOULUH, TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
 from .tuya_ble import TuyaBLEDataPointType, TuyaBLEDevice
 
 
@@ -29,6 +30,7 @@ LOCK_BUTTONS = [
         description=ButtonEntityDescription(key="bluetooth_unlock"),
     )
 ]
+UNLOCK_PULSE_SECONDS = 0.5
 
 mapping = {
     "ms": {"okkyfgfs": LOCK_BUTTONS},
@@ -55,15 +57,53 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
             hass, coordinator, device, product, mapping.description, "button"
         )
         self._mapping = mapping
+        self._press_lock = asyncio.Lock()
 
-    def press(self) -> None:
-        """Trigger DP6 Bluetooth unlock."""
-        datapoint = self._device.datapoints.get_or_create(
-            self._mapping.dp_id,
-            TuyaBLEDataPointType.DT_BOOL,
-            False,
+    @property
+    def available(self) -> bool:
+        """Allow the command to establish a BLE connection on demand."""
+        return True
+
+    async def async_press(self) -> None:
+        """Send the physically tested DP6 pulse on b3 locks."""
+        async with self._press_lock:
+            datapoint = self._device.datapoints.get_or_create(
+                self._mapping.dp_id,
+                TuyaBLEDataPointType.DT_BOOL,
+                False,
+            )
+            if self._device.product_id == PRODUCT_B3AOULUH:
+                await datapoint.set_value(True)
+                await asyncio.sleep(UNLOCK_PULSE_SECONDS)
+                await datapoint.set_value(False)
+            else:
+                await datapoint.set_value(not bool(datapoint.value))
+
+
+class TuyaBLERefreshButton(TuyaBLEEntity, ButtonEntity):
+    """Connect on demand and request the lock's current datapoints."""
+
+    def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass,
+            data.coordinator,
+            data.device,
+            data.product,
+            ButtonEntityDescription(key="refresh_status", name="Actualizar cerradura"),
+            "button",
         )
-        self._hass.create_task(datapoint.set_value(not bool(datapoint.value)))
+
+    @property
+    def available(self) -> bool:
+        """Allow manual refresh precisely when the lock is disconnected."""
+        return True
+
+    async def async_press(self) -> None:
+        """Use the normal paired BLE path without changing connection policy."""
+        await self._device.reconnect_and_update()
+        touch = getattr(self._device, "_lock_power_saver_touch", None)
+        if touch is not None:
+            touch(5.0)
 
 
 async def async_setup_entry(
@@ -83,4 +123,5 @@ async def async_setup_entry(
         for item in get_mapping_by_device(data.device)
         if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)
     ]
+    entities.append(TuyaBLERefreshButton(hass, data))
     async_add_entities(entities)

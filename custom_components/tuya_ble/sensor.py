@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any, Callable
 
 from homeassistant.components.sensor import (
+    RestoreSensor,
     SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
@@ -27,7 +28,8 @@ from .access import (
     access_store_key,
     newest_access_record_from_history,
 )
-from .alarm import ALARM_OPTIONS
+from .alarm import ALARM_OPTIONS, ALARM_STORE_VERSION, alarm_store_key
+from .connection_policy import CONNECTION_MODE_PERIODIC_SYNC, connection_mode, sync_interval_minutes
 from .const import DOMAIN
 from .devices import (
     PRODUCT_B3AOULUH,
@@ -39,6 +41,12 @@ from .devices import (
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 SIGNAL_STRENGTH_DP_ID = -1
+ALARM_SENSOR_STORE_VERSION = 1
+
+
+def alarm_sensor_store_key(entry_id: str) -> str:
+    """Keep DP21 sensor state separate from event deduplication data."""
+    return f"{DOMAIN}.alarm_sensor.{entry_id}"
 
 
 @dataclass
@@ -161,6 +169,73 @@ class TuyaBLESensor(TuyaBLEEntity, SensorEntity):
         self.async_write_ha_state()
 
 
+class TuyaBLEAlarmSensor(TuyaBLEEntity, RestoreSensor):
+    """Keep the most recently reported DP21 alarm across HA restarts."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        coordinator: DataUpdateCoordinator,
+        device: TuyaBLEDevice,
+        product: TuyaBLEProductInfo,
+        mapping: TuyaBLESensorMapping,
+    ) -> None:
+        super().__init__(hass, coordinator, device, product, mapping.description)
+        self._mapping = mapping
+        self._store: Store[dict[str, Any]] = Store(
+            hass, ALARM_SENSOR_STORE_VERSION, alarm_sensor_store_key(entry.entry_id)
+        )
+        self._event_store: Store[dict[str, Any]] = Store(
+            hass, ALARM_STORE_VERSION, alarm_store_key(entry.entry_id)
+        )
+        self._last_saved_value: str | None = None
+
+    @property
+    def available(self) -> bool:
+        """A last-known alarm remains useful while BLE is disconnected."""
+        return self.native_value is not None or self._coordinator.connected
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        TuyaBLESensor._handle_coordinator_update(self)
+        datapoint = self._device.datapoints[self._mapping.dp_id]
+        if (
+            datapoint is not None
+            and datapoint.type == TuyaBLEDataPointType.DT_ENUM
+            and type(datapoint.value) is int
+            and 0 <= datapoint.value < len(ALARM_OPTIONS)
+            and (value := ALARM_OPTIONS[datapoint.value]) != self._last_saved_value
+        ):
+            self._last_saved_value = value
+            self._store.async_delay_save(lambda: {"value": value}, 1.0)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        stored = await self._store.async_load()
+        last_data = await self.async_get_last_sensor_data()
+        if self._device.datapoints[self._mapping.dp_id] is not None:
+            self._handle_coordinator_update()
+            return
+        last_state = await self.async_get_last_state()
+        event_store = await self._event_store.async_load()
+        event_record = event_store.get("last_record") if isinstance(event_store, dict) else None
+        candidates = (
+            stored.get("value") if isinstance(stored, dict) else None,
+            last_data.native_value if last_data is not None else None,
+            last_state.state if last_state is not None else None,
+            event_record.get("event_type") if isinstance(event_record, dict) else None,
+        )
+        for value in candidates:
+            if value in ALARM_OPTIONS:
+                if self.native_value is None:
+                    self._attr_native_value = value
+                    self.async_write_ha_state()
+                self._last_saved_value = value
+                self._store.async_delay_save(lambda: {"value": value}, 1.0)
+                return
+
+
 class TuyaBLELastAccessSensor(SensorEntity):
     """Show when the most recent validated lock access actually occurred."""
 
@@ -250,6 +325,57 @@ class TuyaBLELastAccessSensor(SensorEntity):
         self.async_write_ha_state()
 
 
+class TuyaBLELastConnectedSensor(TuyaBLEEntity, SensorEntity):
+    """Timestamp of the latest completed, paired BLE connection."""
+
+    def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass,
+            data.coordinator,
+            data.device,
+            data.product,
+            SensorEntityDescription(
+                key="last_connected",
+                name="Last connected",
+                device_class=SensorDeviceClass.TIMESTAMP,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+        )
+        timestamp = data.coordinator.last_connected_at
+        if timestamp is not None:
+            self._attr_native_value = datetime.fromtimestamp(timestamp, UTC)
+
+    @property
+    def available(self) -> bool:
+        """The last connection remains meaningful while BLE is disconnected."""
+        return True
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        timestamp = self._coordinator.last_connected_at
+        if timestamp is not None:
+            self._attr_native_value = datetime.fromtimestamp(timestamp, UTC)
+        self.async_write_ha_state()
+
+
+class TuyaBLESyncIntervalSensor(SensorEntity):
+    """Effective configured periodic BLE synchronization interval."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Update interval"
+    _attr_native_unit_of_measurement = "min"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: ConfigEntry, device: TuyaBLEDevice) -> None:
+        self._attr_unique_id = f"{device.device_id}-update_interval"
+        self._attr_device_info = get_device_info(device)
+        self._attr_native_value = (
+            sync_interval_minutes(entry)
+            if connection_mode(entry) == CONNECTION_MODE_PERIODIC_SYNC
+            else 0
+        )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -258,6 +384,8 @@ async def async_setup_entry(
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
     mappings = get_mapping_by_device(data.device)
     entities: list[SensorEntity] = [
+        TuyaBLELastConnectedSensor(hass, data),
+        TuyaBLESyncIntervalSensor(entry, data.device),
         TuyaBLESensor(
             hass,
             data.coordinator,
@@ -266,17 +394,20 @@ async def async_setup_entry(
             rssi_mapping,
         )
     ]
-    entities.extend(
-        TuyaBLESensor(
-            hass,
-            data.coordinator,
-            data.device,
-            data.product,
-            item,
-        )
-        for item in mappings
-        if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)
-    )
+    for item in mappings:
+        if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type):
+            if item.dp_id == 21:
+                entities.append(
+                    TuyaBLEAlarmSensor(
+                        hass, entry, data.coordinator, data.device, data.product, item
+                    )
+                )
+            else:
+                entities.append(
+                    TuyaBLESensor(
+                        hass, data.coordinator, data.device, data.product, item
+                    )
+                )
     if data.device.product_id == PRODUCT_B3AOULUH:
         entities.append(TuyaBLELastAccessSensor(hass, entry, data.device))
     async_add_entities(entities)
