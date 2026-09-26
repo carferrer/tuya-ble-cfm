@@ -26,6 +26,7 @@ class HAError(Exception):
 class FakeBase:
     def __init__(self, hass, coordinator, device, product, description, domain):
         self._device = device
+        self.entity_description = description
         self._attr_unique_id = f"{device.device_id}-{description.key}"
         self.domain = domain
         self.remove_callbacks = []
@@ -97,6 +98,10 @@ def code():
         "TuyaBLEDataPointType": DPType, "HomeAssistantError": HAError,
         "callback": lambda fn: fn, "DOMAIN": "tuya_ble",
         "PRODUCT_B3AOULUH": "b3aouluh", "_LOGGER": SimpleNamespace(warning=lambda *a: None),
+        "er": SimpleNamespace(
+            async_get=lambda hass: SimpleNamespace(async_get_entity_id=lambda *args: None),
+            RegistryEntryDisabler=SimpleNamespace(INTEGRATION="integration"),
+        ),
     }
     exec(compile(tree, "switch.py", "exec", flags=__import__("__future__").annotations.compiler_flag), ns)
     return SimpleNamespace(**ns)
@@ -112,7 +117,8 @@ def make_switch(code, device):
 def test_default_enabled_and_status_from_device_report(code):
     device = FakeDevice()
     switch = make_switch(code, device)
-    assert not hasattr(switch, "_attr_entity_registry_enabled_default")
+    assert switch._attr_entity_registry_enabled_default is True
+    assert switch.entity_description.name == "Modo paso libre"
     assert switch._attr_unique_id == "test-lock-passage_mode_experimental"
     assert switch.available and switch._attr_is_on is False
     device.report(True)
@@ -179,6 +185,23 @@ def test_setup_only_adds_control_for_b3(code):
             hass, SimpleNamespace(entry_id="entry"), added.extend
         ))
         assert len(added) == expected
+
+
+@pytest.mark.parametrize("disabled_by,should_enable", [("integration", True), ("user", False)])
+def test_previous_default_disabled_entity_is_enabled_but_user_choice_is_kept(code, disabled_by, should_enable):
+    updates = []
+    registry = SimpleNamespace(
+        async_get_entity_id=lambda domain, platform, unique_id: "switch.lock_passage_mode",
+        async_get=lambda entity_id: SimpleNamespace(disabled_by=disabled_by),
+        async_update_entity=lambda entity_id, **changes: updates.append((entity_id, changes)),
+    )
+    code.er.async_get = lambda hass: registry
+    data = SimpleNamespace(device=FakeDevice(), product=None, coordinator=None)
+    hass = SimpleNamespace(data={"tuya_ble": {"entry": data}})
+    asyncio.run(code.async_setup_entry(hass, SimpleNamespace(entry_id="entry"), lambda entities: None))
+    assert bool(updates) is should_enable
+    if should_enable:
+        assert updates == [("switch.lock_passage_mode", {"disabled_by": None})]
 
 
 def test_switch_platform_is_not_loaded_for_other_lock():

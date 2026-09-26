@@ -9,6 +9,7 @@ from homeassistant.components.switch import SwitchEntity, SwitchEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
@@ -21,7 +22,9 @@ CONFIRM_TIMEOUT_SECONDS = 15
 
 
 class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
-    """Test whether the DP33 state observed with the inside button is writable."""
+    """Control the lock's physically verified free-passage mode."""
+
+    _attr_entity_registry_enabled_default = True
 
     def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
         super().__init__(
@@ -30,7 +33,7 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
             data.device,
             data.product,
             SwitchEntityDescription(
-                key="passage_mode_experimental", name="Passage mode (experimental)"
+                key="passage_mode_experimental", name="Modo paso libre"
             ),
             "switch",
         )
@@ -122,4 +125,12 @@ async def async_setup_entry(
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
     if data.device.product_id == PRODUCT_B3AOULUH:
+        registry = er.async_get(hass)
+        entity_id = registry.async_get_entity_id(
+            "switch", DOMAIN, f"{data.device.device_id}-passage_mode_experimental"
+        )
+        if entity_id is not None:
+            registered = registry.async_get(entity_id)
+            if registered is not None and registered.disabled_by == er.RegistryEntryDisabler.INTEGRATION:
+                registry.async_update_entity(entity_id, disabled_by=None)
         async_add_entities([TuyaBLEPassageModeSwitch(hass, data)])

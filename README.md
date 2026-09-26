@@ -53,6 +53,7 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Entidad | DP / función |
 | --- | --- |
 | Botón `bluetooth_unlock` | DP6, desbloqueo Bluetooth |
+| Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, ambas familias |
 | Selector `beep_volume` | DP31, volumen |
 | Sensor binario `lock_motor_state` | DP47, estado del motor |
 | Sensor `Alarm` | DP21, último valor de alarma recibido |
@@ -61,15 +62,15 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Evento `Access` | Aperturas, solo `b3aouluh` |
 | Sensor `Last access` | Hora de la apertura más reciente, solo `b3aouluh` |
 | Evento `Alarm events` | Registros individuales DP21, solo `b3aouluh` |
-| Interruptor `Passage mode` | DP33, solo `b3aouluh`; entidad habilitada por defecto |
+| Interruptor `Modo paso libre` | DP33, solo `b3aouluh`; entidad habilitada por defecto |
 | Sensor `Last connected` | Última conexión BLE emparejada, ambas familias |
 | Sensor `Update interval` | Intervalo periódico en minutos; 0 en los otros modos, ambas familias |
 
 El sensor `Alarm` muestra un estado. `Alarm events` permite reaccionar a cada registro nuevo, incluidos varios fallos consecutivos del mismo tipo con horas distintas. Las alarmas no se convierten en aperturas ni modifican `Last access`.
 
-El interruptor Passage mode refleja el DP33 confirmado por la cerradura. Habilitar la entidad no activa físicamente el modo. El evento `Access` emite `passage_mode_enabled` (`event_type_id: 33`) solo cuando DP33 pasa de desactivado a activado. No se emite al cerrarlo, con informes repetidos ni al arrancar HA con el modo ya activado. La hora del evento es la de recepción en HA; no es un registro histórico de apertura.
+El interruptor Modo paso libre refleja el DP33 confirmado por la cerradura. Habilitar la entidad no activa físicamente el modo. Las entidades deshabilitadas por defecto en la versión experimental se habilitan al cargar la integración; una deshabilitación manual del usuario se respeta. Se conserva el mismo `unique_id` y `entity_id`. El evento `Access` emite `passage_mode_enabled` (`event_type_id: 33`) solo cuando DP33 pasa de desactivado a activado. No se emite al cerrarlo, con informes repetidos ni al arrancar HA con el modo ya activado. La hora del evento es la de recepción en HA; no es un registro histórico de apertura.
 
-`Last connected` conserva durante la desconexión la hora de la última conexión BLE emparejada vista por este proceso de HA. Tras un reinicio empieza sin valor hasta la siguiente conexión. `Update interval` muestra los minutos configurados en modo periódico; muestra 0 en los modos bajo demanda, detección de actividad y keep-alive. Ninguno de estos sensores abre conexiones BLE adicionales.
+`Last connected` conserva durante la desconexión la hora de la última conexión BLE emparejada vista por este proceso de HA. Tras un reinicio empieza sin valor hasta la siguiente conexión. `Update interval` muestra los minutos configurados en modo periódico; muestra 0 en los modos bajo demanda, detección de actividad y keep-alive. Ninguno de estos sensores abre conexiones BLE adicionales. El botón `Actualizar cerradura` fuerza una conexión y una lectura de estado únicamente cuando se pulsa; la conexión vuelve a seguir el modo de ahorro configurado.
 
 ## Conexión y ahorro de batería
 
@@ -268,10 +269,10 @@ También quedan pendientes:
 
 Los diagnósticos de una cerradura `b3aouluh` mostraron DP33 (`DT_BOOL`) y DP47 en `false` en estado normal, `true` con el botón interior en modo abierto y de nuevo `false` tras desactivarlo. La prueba física posterior confirmó que encender y apagar DP33 desde HA cambia el modo de paso libre en esa cerradura. Las otras cerraduras `b3aouluh` aún requieren validación física.
 
-La rama experimental añade un interruptor **Passage mode (experimental)** solo para `b3aouluh`, habilitado por defecto como entidad. No cambia DP6, DP47, DP69 ni la política de conexiones. Para comprobarlo en otra cerradura:
+La rama experimental añade el interruptor **Modo paso libre** solo para `b3aouluh`, habilitado por defecto como entidad. No cambia DP6, DP47, DP69 ni la política de conexiones. Para comprobarlo en otra cerradura:
 
 1. Instala la rama experimental y reinicia Home Assistant.
-2. En **Ajustes → Dispositivos y servicios → Entidades**, busca el interruptor en la cerradura elegida. Debe mostrar el estado reportado de DP33: apagado en normal, encendido al activar el botón interior. Si el estado no coincide, detén la prueba. Una entidad deshabilitada manualmente con anterioridad seguirá deshabilitada hasta volver a habilitarla.
+2. En **Ajustes → Dispositivos y servicios → Entidades**, busca el interruptor en la cerradura elegida. Debe mostrar el estado reportado de DP33: apagado en normal, encendido al activar el botón interior. Si el estado no coincide, detén la prueba. Una entidad deshabilitada manualmente por el usuario seguirá deshabilitada hasta volver a habilitarla.
 3. Con la cerradura a la vista y pudiendo volver a normal físicamente, enciende el interruptor en HA. Comprueba físicamente si queda en paso libre y si HA recibe DP33 `true`.
 4. Apágalo desde HA. Comprueba que vuelve a normal y que HA recibe DP33 `false`. Si no hay confirmación en 15 segundos, la acción mostrará un error; el efecto físico puede haber ocurrido igualmente, así que inspecciona la cerradura antes de repetirla.
 5. Guarda diagnósticos y los mensajes del registro para comparar DP33 y DP47.

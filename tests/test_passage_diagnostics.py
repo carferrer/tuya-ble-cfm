@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -95,3 +96,36 @@ def test_update_interval_reports_zero_outside_periodic_mode():
     for mode, expected in [("periodic_sync", 60), ("power_save", 0), ("keep_alive", 0), ("on_demand", 0)]:
         entry = SimpleNamespace(options={"connection_mode": mode, "sync_interval_minutes": 60})
         assert sensor(entry, device)._attr_native_value == expected
+
+
+def test_manual_refresh_button_connects_once_and_keeps_response_window_open():
+    tree = ast.parse((ROOT / "button.py").read_text(encoding="utf-8"))
+    cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TuyaBLERefreshButton")
+    cls.bases = [ast.Name(id="FakeBase", ctx=ast.Load())]
+    calls = []
+
+    class FakeBase:
+        def __init__(self, hass, coordinator, device, product, description, domain):
+            self._device = device
+            self.description = description
+
+    namespace = {
+        "FakeBase": FakeBase,
+        "ButtonEntityDescription": lambda **kw: SimpleNamespace(**kw),
+    }
+    module = ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[]))
+    exec(compile(module, "button.py", "exec", flags=__import__("__future__").annotations.compiler_flag), namespace)
+
+    async def reconnect_and_update():
+        calls.append("refresh")
+
+    device = SimpleNamespace(
+        reconnect_and_update=reconnect_and_update,
+        _lock_power_saver_touch=lambda seconds: calls.append(seconds),
+    )
+    data = SimpleNamespace(device=device, coordinator=SimpleNamespace(connected=False), product=None)
+    button = namespace["TuyaBLERefreshButton"](None, data)
+    assert button.available is True
+    assert button.description.name == "Actualizar cerradura"
+    asyncio.run(button.async_press())
+    assert calls == ["refresh", 5.0]

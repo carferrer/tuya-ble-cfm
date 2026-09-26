@@ -46,6 +46,9 @@
             },
             "bluetooth_unlock": {
                 "name": "Unlock"
+            },
+            "refresh_status": {
+                "name": "Actualizar cerradura"
             }
         },
         "number": {
@@ -243,7 +246,7 @@
                 "name": "Manual control"
             },
             "passage_mode_experimental": {
-                "name": "Passage mode (experimental)"
+                "name": "Modo paso libre"
             },
             "program": {
                 "name": "Program"

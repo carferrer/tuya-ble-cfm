@@ -66,6 +66,32 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
         self._hass.create_task(datapoint.set_value(not bool(datapoint.value)))
 
 
+class TuyaBLERefreshButton(TuyaBLEEntity, ButtonEntity):
+    """Connect on demand and request the lock's current datapoints."""
+
+    def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass,
+            data.coordinator,
+            data.device,
+            data.product,
+            ButtonEntityDescription(key="refresh_status", name="Actualizar cerradura"),
+            "button",
+        )
+
+    @property
+    def available(self) -> bool:
+        """Allow manual refresh precisely when the lock is disconnected."""
+        return True
+
+    async def async_press(self) -> None:
+        """Use the normal paired BLE path without changing connection policy."""
+        await self._device.reconnect_and_update()
+        touch = getattr(self._device, "_lock_power_saver_touch", None)
+        if touch is not None:
+            touch(5.0)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -83,4 +109,5 @@ async def async_setup_entry(
         for item in get_mapping_by_device(data.device)
         if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)
     ]
+    entities.append(TuyaBLERefreshButton(hass, data))
     async_add_entities(entities)
