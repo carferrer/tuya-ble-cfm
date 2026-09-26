@@ -109,10 +109,10 @@ def make_switch(code, device):
     return switch
 
 
-def test_default_disabled_and_status_from_device_report(code):
+def test_default_enabled_and_status_from_device_report(code):
     device = FakeDevice()
     switch = make_switch(code, device)
-    assert switch._attr_entity_registry_enabled_default is False
+    assert not hasattr(switch, "_attr_entity_registry_enabled_default")
     assert switch._attr_unique_id == "test-lock-passage_mode_experimental"
     assert switch.available and switch._attr_is_on is False
     device.report(True)

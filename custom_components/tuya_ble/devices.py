@@ -88,6 +88,7 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         super().__init__(hass, _LOGGER, name=DOMAIN)
         self._device = device
         self._disconnected = True
+        self.last_connected_at: float | None = None
         self._unsub_disconnect: CALLBACK_TYPE | None = None
         self._dp69_response_client = None
         self._device._cfm_received_dp_events = []
@@ -109,9 +110,13 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
     def _async_handle_connect(self) -> None:
         if self._unsub_disconnect is not None:
             self._unsub_disconnect()
+            self._unsub_disconnect = None
+        if not self._device.connected:
+            return
+        self.last_connected_at = time.time()
         if self._disconnected:
             self._disconnected = False
-            self.async_update_listeners()
+        self.async_update_listeners()
 
     async def _async_reply_dp69_cached_records(
         self,
@@ -209,7 +214,8 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
                         "Tuya BLE CFM DP69 cached-record response",
                     )
 
-        self._async_handle_connect()
+        if self._disconnected:
+            self._async_handle_connect()
         self.async_set_updated_data(None)
 
     @callback

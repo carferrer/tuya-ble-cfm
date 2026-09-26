@@ -28,6 +28,7 @@ from .access import (
     newest_access_record_from_history,
 )
 from .alarm import ALARM_OPTIONS
+from .connection_policy import CONNECTION_MODE_PERIODIC_SYNC, connection_mode, sync_interval_minutes
 from .const import DOMAIN
 from .devices import (
     PRODUCT_B3AOULUH,
@@ -250,6 +251,57 @@ class TuyaBLELastAccessSensor(SensorEntity):
         self.async_write_ha_state()
 
 
+class TuyaBLELastConnectedSensor(TuyaBLEEntity, SensorEntity):
+    """Timestamp of the latest completed, paired BLE connection."""
+
+    def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass,
+            data.coordinator,
+            data.device,
+            data.product,
+            SensorEntityDescription(
+                key="last_connected",
+                name="Last connected",
+                device_class=SensorDeviceClass.TIMESTAMP,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+        )
+        timestamp = data.coordinator.last_connected_at
+        if timestamp is not None:
+            self._attr_native_value = datetime.fromtimestamp(timestamp, UTC)
+
+    @property
+    def available(self) -> bool:
+        """The last connection remains meaningful while BLE is disconnected."""
+        return True
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        timestamp = self._coordinator.last_connected_at
+        if timestamp is not None:
+            self._attr_native_value = datetime.fromtimestamp(timestamp, UTC)
+        self.async_write_ha_state()
+
+
+class TuyaBLESyncIntervalSensor(SensorEntity):
+    """Effective configured periodic BLE synchronization interval."""
+
+    _attr_has_entity_name = True
+    _attr_name = "Update interval"
+    _attr_native_unit_of_measurement = "min"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+
+    def __init__(self, entry: ConfigEntry, device: TuyaBLEDevice) -> None:
+        self._attr_unique_id = f"{device.device_id}-update_interval"
+        self._attr_device_info = get_device_info(device)
+        self._attr_native_value = (
+            sync_interval_minutes(entry)
+            if connection_mode(entry) == CONNECTION_MODE_PERIODIC_SYNC
+            else 0
+        )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -258,6 +310,8 @@ async def async_setup_entry(
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
     mappings = get_mapping_by_device(data.device)
     entities: list[SensorEntity] = [
+        TuyaBLELastConnectedSensor(hass, data),
+        TuyaBLESyncIntervalSensor(entry, data.device),
         TuyaBLESensor(
             hass,
             data.coordinator,

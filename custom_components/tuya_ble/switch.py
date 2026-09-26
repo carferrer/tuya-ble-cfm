@@ -1,4 +1,4 @@
-"""Opt-in passage-mode experiment for the physically tested b3aouluh lock."""
+"""Passage-mode control for the physically tested b3aouluh lock."""
 
 from __future__ import annotations
 
@@ -22,9 +22,6 @@ CONFIRM_TIMEOUT_SECONDS = 15
 
 class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
     """Test whether the DP33 state observed with the inside button is writable."""
-
-    # Enable this only on the one lock selected for the physical experiment.
-    _attr_entity_registry_enabled_default = False
 
     def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
         super().__init__(
