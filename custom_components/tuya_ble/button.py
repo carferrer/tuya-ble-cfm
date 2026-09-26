@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from homeassistant.components.button import ButtonEntity, ButtonEntityDescription
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -31,6 +32,7 @@ LOCK_BUTTONS = [
     )
 ]
 UNLOCK_PULSE_SECONDS = 0.5
+OKKY_UNLOCK_PAYLOAD = b"\x01\x01"
 
 
 async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
@@ -40,15 +42,24 @@ async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
         command_lock = device._cfm_unlock_command_lock = asyncio.Lock()
 
     async with command_lock:
-        datapoint = device.datapoints.get_or_create(
-            6, TuyaBLEDataPointType.DT_BOOL, False
-        )
         if device.product_id == PRODUCT_B3AOULUH:
+            datapoint = device.datapoints.get_or_create(
+                6, TuyaBLEDataPointType.DT_BOOL, False
+            )
             await datapoint.set_value(True)
             await asyncio.sleep(UNLOCK_PULSE_SECONDS)
             await datapoint.set_value(False)
         else:
-            await datapoint.set_value(not bool(datapoint.value))
+            # okkyfgfs declares DP6 as raw. 0x01 requests unlock and the
+            # reported member ID in the owner's DP6 sample is 0x01.
+            datapoint = device.datapoints.get_or_create(
+                6, TuyaBLEDataPointType.DT_RAW, b"\x00\x01"
+            )
+            if datapoint.type != TuyaBLEDataPointType.DT_RAW:
+                raise HomeAssistantError("Expected a raw DP6 on okkyfgfs")
+            await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
+            await asyncio.sleep(UNLOCK_PULSE_SECONDS)
+            await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
 
 mapping = {
     "ms": {"okkyfgfs": LOCK_BUTTONS},

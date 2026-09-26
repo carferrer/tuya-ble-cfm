@@ -1216,7 +1216,16 @@ class TuyaBLEDevice:
             pos = next_pos
 
         # Validate the entire payload before exposing any partial DP updates.
+        # The cache keeps one mutable object per DP. If a frame contains the
+        # same ID twice, publish the preceding group before updating that
+        # object again; otherwise every callback entry sees only the final
+        # value and earlier access/alarm records disappear.
+        seen_ids: set[int] = set()
         for id, type, value in parsed:
+            if id in seen_ids:
+                self._fire_callbacks(datapoints)
+                datapoints = []
+                seen_ids.clear()
             _LOGGER.debug(
                 "%s: Received datapoint update, id: %s, type: %s: value: %s",
                 self.address,
@@ -1227,6 +1236,7 @@ class TuyaBLEDevice:
             self._datapoints._update_from_device(
                 id, timestamp, flags, type, value)
             datapoints.append(self._datapoints[id])
+            seen_ids.add(id)
 
         self._fire_callbacks(datapoints)
 

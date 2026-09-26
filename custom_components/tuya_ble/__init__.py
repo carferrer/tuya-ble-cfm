@@ -40,9 +40,11 @@ PRODUCT_OKKYFGFS = "okkyfgfs"
 
 
 def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
-    """Load the experimental DP33 control only for the b3 lock family."""
+    """Load motor locks for both families and passage control only for b3."""
     if device.product_id == PRODUCT_B3AOULUH:
         return PLATFORMS
+    if device.product_id == PRODUCT_OKKYFGFS:
+        return [platform for platform in PLATFORMS if platform != Platform.SWITCH]
     return [
         platform
         for platform in PLATFORMS

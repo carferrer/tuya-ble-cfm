@@ -83,13 +83,13 @@ def _alarm_sensor_class():
     return ns["TuyaBLEAlarmSensor"]
 
 
-def _sensor(current_dp=None, restored="wrong_finger", legacy_state=None, db=None):
+def _sensor(current_dp=None, restored="wrong_finger", legacy_state=None, db=None, entry_id="entry"):
     cls = _alarm_sensor_class()
     coordinator = SimpleNamespace(connected=False)
     device = SimpleNamespace(datapoints={21: current_dp})
     mapping = SimpleNamespace(dp_id=21, coefficient=1, getter=None, description=SimpleNamespace(options=["wrong_finger", "wrong_password"]))
     db = {} if db is None else db
-    sensor = cls(db, SimpleNamespace(entry_id="entry"), coordinator, device, None, mapping)
+    sensor = cls(db, SimpleNamespace(entry_id=entry_id), coordinator, device, None, mapping)
     sensor._restored_data = None if restored is None else SimpleNamespace(native_value=restored)
     sensor._restored_state = None if legacy_state is None else SimpleNamespace(state=legacy_state)
     return sensor, coordinator, device
@@ -146,3 +146,27 @@ def test_sensor_store_survives_subsequent_restart_without_ha_restore():
     next_sensor, coordinator, device = _sensor(restored=None, db=db)
     asyncio.run(next_sensor.async_added_to_hass())
     assert next_sensor.native_value == "wrong_password"
+
+
+def test_two_locks_restore_independent_alarms_and_accept_new_reports():
+    db = {}
+    for entry_id, value in (("b3-lock", 0), ("okky-lock", 1)):
+        sensor, _, _ = _sensor(
+            current_dp=SimpleNamespace(type=DPType.DT_ENUM, value=value),
+            restored=None, db=db, entry_id=entry_id,
+        )
+        asyncio.run(sensor.async_added_to_hass())
+
+    b3, _, _ = _sensor(restored=None, db=db, entry_id="b3-lock")
+    okky, _, device = _sensor(restored=None, db=db, entry_id="okky-lock")
+    asyncio.run(b3.async_added_to_hass())
+    asyncio.run(okky.async_added_to_hass())
+    assert b3.native_value == "wrong_finger"
+    assert okky.native_value == "wrong_password"
+    assert b3.available and okky.available
+
+    device.datapoints[21] = SimpleNamespace(type=DPType.DT_ENUM, value=0)
+    okky._handle_coordinator_update()
+    assert okky.native_value == "wrong_finger"
+    assert db["sensor.okky-lock"] == {"value": "wrong_finger"}
+    assert db["sensor.b3-lock"] == {"value": "wrong_finger"}

@@ -27,7 +27,7 @@ from .access import (
 from .alarm_event import TuyaBLEAlarmEvent
 from .connection_policy import setup_connection_policy
 from .const import DOMAIN
-from .devices import PRODUCT_B3AOULUH, TuyaBLEData, get_device_info
+from .devices import PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS, TuyaBLEData, get_device_info
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 
@@ -57,6 +57,12 @@ class TuyaBLEAccessEvent(EventEntity):
         self._queued_records: list[dict[str, Any]] = []
         self._passage_mode: bool | None = None
         self._pending_passage_open = False
+        if device.product_id != PRODUCT_B3AOULUH:
+            self._attr_event_types = [
+                event_type
+                for event_type in ACCESS_EVENT_TYPES
+                if event_type != EVENT_PASSAGE_MODE_ENABLED
+            ]
         self._attr_unique_id = f"{device.device_id}-access"
         self._attr_device_info = get_device_info(device)
 
@@ -132,7 +138,8 @@ class TuyaBLEAccessEvent(EventEntity):
         """Handle live or replayed access datapoints from the BLE transport."""
         for datapoint in updates:
             if (
-                datapoint.id == DP_PASSAGE_MODE
+                self._device.product_id == PRODUCT_B3AOULUH
+                and datapoint.id == DP_PASSAGE_MODE
                 and datapoint.type == TuyaBLEDataPointType.DT_BOOL
                 and type(datapoint.value) is bool
             ):
@@ -223,7 +230,7 @@ async def async_setup_entry(
         entry.async_on_unload(unsubscribe)
     entry.async_on_unload(entry.add_update_listener(_async_connection_options_updated))
 
-    if data.device.product_id != PRODUCT_B3AOULUH:
+    if data.device.product_id not in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS):
         return
 
     async_add_entities([

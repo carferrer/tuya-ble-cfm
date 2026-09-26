@@ -22,7 +22,7 @@ Se han probado físicamente la recuperación de varias aperturas, los accesos po
 | Product ID | Modelo / categoría | Funciones básicas | Eventos Access / Alarm events y recuperación DP69 |
 | --- | --- | --- | --- |
 | `b3aouluh` | Smart Lock / `jtmspro` | Sí | Sí |
-| `okkyfgfs` | P196_V / `ms` | Sí | Pendientes de validar y adaptar |
+| `okkyfgfs` | P196_V / `ms` | Sí | Access y varias notificaciones de alarma probados; recuperación completa y DP69 no confirmados |
 
 La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. La compatibilidad de otros productos Tuya no está garantizada.
 
@@ -53,7 +53,7 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Entidad | DP / función |
 | --- | --- |
 | Botón `bluetooth_unlock` | DP6, desbloqueo Bluetooth |
-| Entidad `lock` (`motor_lock`) | Solo `b3aouluh`: estado reportado por DP47 y comando DP6 para ambas acciones |
+| Entidad `lock` (`motor_lock`) | Ambas familias: estado reportado por DP47 y comando DP6 para ambas acciones |
 | Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, ambas familias |
 | Selector `beep_volume` | DP31, volumen |
 | Sensor binario `lock_motor_state` | DP47, estado del motor |
@@ -61,22 +61,22 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Sensor `Alarm` | DP21, último valor de alarma recibido |
 | Batería | DP8 en `okkyfgfs`; DP9 `battery_state` en `b3aouluh` |
 | RSSI | Diagnóstico de señal |
-| Evento `Access` | Aperturas, solo `b3aouluh` |
-| Sensor `Last access` | Hora de la apertura más reciente, solo `b3aouluh` |
-| Evento `Alarm events` | Registros individuales DP21, solo `b3aouluh` |
+| Evento `Access` | Aperturas DP12/13/14/15/19/55/62/63, ambas familias si la cerradura los reporta |
+| Sensor `Last access` | Hora de la apertura más reciente, ambas familias |
+| Evento `Alarm events` | Registros individuales DP21, ambas familias |
 | Interruptor `Modo paso libre` | DP33, solo `b3aouluh`; entidad habilitada por defecto |
 | Sensor `Last connected` | Última conexión BLE emparejada, ambas familias |
 | Sensor `Update interval` | Intervalo periódico en minutos; 0 en los otros modos, ambas familias |
 
 El sensor `Alarm` muestra un estado. `Alarm events` permite reaccionar a cada registro nuevo, incluidos varios fallos consecutivos del mismo tipo con horas distintas. Las alarmas no se convierten en aperturas ni modifican `Last access`.
 
-El sensor `alarm_lock` guarda por cerradura su último valor DP21 válido y lo recupera tras reiniciar HA. Al actualizar desde una versión anterior, también puede tomar el último registro de alarma que la integración ya había archivado localmente. Una nueva lectura DP21 tiene prioridad sobre el valor guardado. La recuperación no abre una conexión BLE ni vuelve a emitir eventos; hasta recibir una lectura nueva, el estado mostrado es el último conocido. Si una cerradura nunca ha comunicado una alarma y no hay registro previo, el sensor seguirá sin valor hasta el primer DP21.
+El sensor `alarm_lock`, tanto en `b3aouluh` como en `okkyfgfs`, guarda por cerradura su último valor DP21 válido y lo recupera tras reiniciar HA. Al actualizar desde una versión anterior, también puede tomar el último registro de alarma que la integración ya había archivado localmente. Una nueva lectura DP21 tiene prioridad sobre el valor guardado. La recuperación no abre una conexión BLE ni vuelve a emitir eventos; hasta recibir una lectura nueva, el estado mostrado es el último conocido. Si una cerradura nunca ha comunicado una alarma y no hay registro previo, el sensor seguirá sin valor hasta el primer DP21.
 
-En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 500 ms tras completar esa escritura y envía DP6 `false`. Esto reproduce la doble pulsación que funcionó en la instalación, sin necesitar una automatización. El botón puede iniciar la conexión BLE aunque la cerradura esté desconectada; si falla la primera escritura, no envía la segunda. `okkyfgfs` conserva el comando DP6 único previo hasta validarlo físicamente.
+En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 500 ms tras completar esa escritura y envía DP6 `false`. Esto reproduce la doble pulsación que funcionó en la instalación, sin necesitar una automatización. En `okkyfgfs`, DP6 es `raw`: envía dos veces `01 01` (orden de apertura e ID de miembro 1 del ejemplo facilitado), con 500 ms entre escrituras. El botón se ha validado físicamente en ambas familias. Puede iniciar la conexión BLE aunque la cerradura esté desconectada; si falla la primera escritura, no envía la segunda.
 
-La entidad `lock` de `b3aouluh` muestra `locked` cuando el último DP47 Booleano recibido es `false` y `unlocked` cuando es `true`. Sin lectura previa, muestra `unknown`. Las acciones **Bloquear** y **Desbloquear** envían exactamente la misma secuencia DP6 que el botón, sin cambiar el estado de forma optimista: solo un nuevo DP47 puede actualizarlo. El comando DP6 no garantiza que **Bloquear** cierre el modo de paso libre; para eso se usa el interruptor `Modo paso libre`. Como la cerradura se desconecta para ahorrar batería, el estado visible es la última lectura conocida y puede quedar desactualizado hasta la próxima conexión o al pulsar `Actualizar cerradura`.
+La entidad `lock` de ambas familias muestra `locked` cuando el último DP47 Booleano recibido es `false` y `unlocked` cuando es `true`. Sin lectura previa, muestra `unknown`. Las acciones **Bloquear** y **Desbloquear** envían exactamente la misma secuencia DP6 que el botón de apertura de cada modelo, sin cambiar el estado de forma optimista: solo un nuevo DP47 puede actualizarlo. Por tanto, **Bloquear** también envía una orden de apertura y no garantiza el cierre del modo de paso libre. En `b3aouluh`, el paso libre se controla con su interruptor específico; en `okkyfgfs` no se ha identificado un comando para ese modo. Como la cerradura se desconecta para ahorrar batería, el estado visible es la última lectura conocida y puede quedar desactualizado hasta recibir un nuevo DP47. En las pruebas de `okkyfgfs`, DP47 se recibe al cambiar el motor mientras está conectada, pero no se vuelve a enviar con cada actualización manual.
 
-Al reiniciar HA, `lock`, `lock_motor_state` y `Modo paso libre` recuperan el último DP47 o DP33 Booleano recibido de la cerradura. Una lectura nueva sustituye el valor guardado; los valores provisionales de la caché BLE y las escrituras enviadas desde HA no lo sustituyen. En la primera instalación de esta versión todavía no hay valor guardado y puede verse `unknown` hasta la primera conexión. El estado del motor se conserva en ambas familias; `lock` y `Modo paso libre` siguen siendo exclusivos de `b3aouluh`.
+Al reiniciar HA, `lock`, `lock_motor_state` y `Modo paso libre` recuperan el último DP47 o DP33 Booleano recibido de la cerradura. Una lectura nueva sustituye el valor guardado; los valores provisionales de la caché BLE y las escrituras enviadas desde HA no lo sustituyen. Sin un valor guardado puede verse `unknown` hasta recibir el primer informe correspondiente. El estado del motor y la entidad `lock` están disponibles en ambas familias; `Modo paso libre` es exclusivo de `b3aouluh`.
 
 El interruptor Modo paso libre refleja el DP33 confirmado por la cerradura. Habilitar la entidad no activa físicamente el modo. Las entidades deshabilitadas por defecto en la versión experimental se habilitan al cargar la integración; una deshabilitación manual del usuario se respeta. Se conserva el mismo `unique_id` y `entity_id`. El evento `Access` emite `passage_mode_enabled` (`event_type_id: 33`) solo cuando DP33 pasa de desactivado a activado. No se emite al cerrarlo, con informes repetidos ni al arrancar HA con el modo ya activado. La hora del evento es la de recepción en HA; no es un registro histórico de apertura.
 
@@ -272,7 +272,9 @@ Se han observado fallos `starting notifications failed`, `GATT Error 133`, desco
 
 También quedan pendientes:
 
-- Obtener y validar los DP de eventos de la otra cerradura, `okkyfgfs`.
+- Validar la nueva entidad `lock` de `okkyfgfs` y el alcance de la recuperación de registros al reconectar. El botón DP6 `raw`, los eventos de apertura y varias notificaciones de alarma ya se han probado. No se asume que use DP69.
+- Verificar la correspondencia numérica de `low_battery` en DP21 de `okkyfgfs`: el modelo declara tres opciones, pero su descripción utiliza la enumeración general de alarmas.
+- Identificar, si existe, un comando de paso libre para `okkyfgfs`. Su modelo declara DP47 como solo lectura y no incluye un control específico de paso libre.
 - Probar físicamente los métodos de apertura y alarmas aún no ensayados.
 - Medir la autonomía real con los distintos intervalos de conexión.
 - Implementar, si se necesita, el envío externo a MSSQL.
@@ -293,7 +295,7 @@ El interruptor solo acepta un DP33 Booleano previamente reportado. La escritura 
 
 ## Validación
 
-La versión consolidada de eventos e IDs pasó **88 pruebas**, Ruff, Hassfest y HACS. Las pruebas cubren el parser BLE, el alcance de los productos, las políticas de conexión, los IDs de entidades y el comportamiento de los eventos: tipos, fechas, duplicados, carga inicial y recargas.
+La suite actual contiene **126 pruebas**. Cubre el parser BLE, el alcance de los productos, las políticas de conexión, los IDs de entidades, las acciones y estados de `lock` en ambas familias, la restauración de alarmas por cerradura y el comportamiento de los eventos: tipos, fechas, duplicados, carga inicial y recargas. También se comprueba con Ruff, Hassfest y HACS.
 
 Las pruebas de entidades utilizan dobles ligeros de los límites de Home Assistant. Se complementan con las pruebas físicas descritas arriba; no equivalen a haber probado todos los tipos de evento en todas las cerraduras.
 

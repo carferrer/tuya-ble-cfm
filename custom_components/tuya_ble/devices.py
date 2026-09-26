@@ -26,6 +26,7 @@ from .tuya_ble import (
 _LOGGER = logging.getLogger(__name__)
 
 PRODUCT_B3AOULUH = "b3aouluh"
+PRODUCT_OKKYFGFS = "okkyfgfs"
 DP_GET_RECORDS = 69
 DP_GET_RECORDS_REQUEST_ACTION = 0x01
 MOBILE_CENTRAL_ID = b"\xff\xff"

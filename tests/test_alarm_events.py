@@ -172,13 +172,15 @@ def test_all_thirteen_alarm_types_can_be_emitted(code):
 @pytest.mark.parametrize("dp_id", [12, 13, 14, 15, 19, 55, 62, 63])
 def test_access_type_id_is_additive_and_does_not_change_deduplication(code, dp_id):
     ns = vars(code).copy()
+    ns["PRODUCT_B3AOULUH"] = "b3aouluh"
+    ns["EVENT_PASSAGE_MODE_ENABLED"] = "passage_mode_enabled"
     load_code("access.py", ns)
     load_code("event.py", ns)
     record = ns["build_access_record"](dp_id, 200, 100, 110)
     assert record["event_type_id"] == dp_id
     legacy_record = {key: value for key, value in record.items() if key != "event_type_id"}
     assert ns["access_record_key"](legacy_record) == ns["access_record_key"](record)
-    device = SimpleNamespace(device_id="lock1")
+    device = SimpleNamespace(device_id="lock1", product_id="b3aouluh")
     access = ns["TuyaBLEAccessEvent"]({}, SimpleNamespace(entry_id="lock1"), device)
     access.emitted = []
     access._process_record(record)
@@ -186,6 +188,31 @@ def test_access_type_id_is_additive_and_does_not_change_deduplication(code, dp_i
     assert access.emitted[0][1]["access_value"] == 200
     assert access.emitted[0][1]["member_id"] == 200
     access._process_record(legacy_record)
+
+
+def test_okky_access_event_emits_live_fingerprint_without_passage_mode(code):
+    ns = vars(code).copy()
+    ns["PRODUCT_B3AOULUH"] = "b3aouluh"
+    ns["EVENT_PASSAGE_MODE_ENABLED"] = "passage_mode_enabled"
+    load_code("access.py", ns)
+    load_code("event.py", ns)
+    device = SimpleNamespace(
+        device_id="okky-lock",
+        product_id="okkyfgfs",
+        datapoints={33: None},
+        _cfm_received_dp_events=[],
+        register_callback=lambda callback: lambda: None,
+    )
+    access = ns["TuyaBLEAccessEvent"](
+        {}, SimpleNamespace(entry_id="okky-lock"), device
+    )
+    asyncio.run(access.async_added_to_hass())
+    assert "passage_mode_enabled" not in access._attr_event_types
+    report = dp(100, dp_id=12, dp_type=DPType.DT_VALUE)
+    access._handle_updates([report, report])
+    assert len(access.emitted) == 1
+    assert access.emitted[0][0] == "fingerprint_unlock"
+    assert access.emitted[0][1]["event_type_id"] == 12
     assert len(access.emitted) == 1
 
 
@@ -243,7 +270,8 @@ def test_setup_only_adds_alarm_for_validated_product(code):
     ns.update(
         {
             "setup_connection_policy": lambda *args: None,
-            "PRODUCT_B3AOULUH": "b3aouluh",
+                "PRODUCT_B3AOULUH": "b3aouluh",
+                "PRODUCT_OKKYFGFS": "okkyfgfs",
         }
     )
     # Load the real platform setup with an inert access entity constructor.
@@ -259,7 +287,7 @@ def test_setup_only_adds_alarm_for_validated_product(code):
         ),
         ns,
     )
-    for product, expected in [("b3aouluh", 2), ("okkyfgfs", 0)]:
+    for product, expected in [("b3aouluh", 2), ("okkyfgfs", 2)]:
         added = []
         device = SimpleNamespace(product_id=product, device_id="lock1")
         entry = SimpleNamespace(

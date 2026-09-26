@@ -214,7 +214,7 @@ def test_previous_default_disabled_entity_is_enabled_but_user_choice_is_kept(cod
         assert updates == [("switch.lock_passage_mode", {"disabled_by": None})]
 
 
-def test_switch_platform_is_not_loaded_for_other_lock():
+def test_motor_lock_platform_loads_for_both_families_and_switch_only_for_b3():
     tree = ast.parse((ROOT / "__init__.py").read_text(encoding="utf-8"))
     fn = next(
         node for node in tree.body
@@ -230,12 +230,16 @@ def test_switch_platform_is_not_loaded_for_other_lock():
         "Platform": Platform,
         "PLATFORMS": [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH, Platform.LOCK],
         "PRODUCT_B3AOULUH": "b3aouluh",
+        "PRODUCT_OKKYFGFS": "okkyfgfs",
     }
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "__init__.py", "exec",
                  flags=__import__("__future__").annotations.compiler_flag), ns)
     select = ns["_platforms_for_device"]
     assert select(SimpleNamespace(product_id="b3aouluh")) == ns["PLATFORMS"]
     assert select(SimpleNamespace(product_id="okkyfgfs")) == [
+        Platform.BUTTON, Platform.SENSOR, Platform.LOCK
+    ]
+    assert select(SimpleNamespace(product_id="unsupported")) == [
         Platform.BUTTON, Platform.SENSOR
     ]
     source = (ROOT / "__init__.py").read_text(encoding="utf-8")

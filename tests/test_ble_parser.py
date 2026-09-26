@@ -205,6 +205,28 @@ def test_valid_dp69_and_access_payload_values_preserved(device):
     ]
 
 
+def test_repeated_alarm_id_in_one_frame_preserves_every_value(device):
+    class Datapoints(dict):
+        def _update_from_device(self, id, timestamp, flags, type, value):
+            if id not in self:
+                self[id] = SimpleNamespace(id=id, value=value)
+            else:
+                self[id].value = value
+
+    device._datapoints = Datapoints()
+    received = []
+    device._fire_callbacks = lambda updates: received.extend(
+        (dp.id, dp.value) for dp in updates
+    )
+    device._parse_datapoints_v3(
+        123,
+        0,
+        b"\x15\x04\x01\x00\x15\x04\x01\x01\x15\x04\x01\x00",
+        0,
+    )
+    assert received == [(21, 0), (21, 1), (21, 0)]
+
+
 @pytest.mark.parametrize("time_type", [0, 1])
 def test_timestamped_records_ack_status_sequence_and_original_values(device, time_type):
     """Each complete timestamped record gets its own one-byte success ACK."""
