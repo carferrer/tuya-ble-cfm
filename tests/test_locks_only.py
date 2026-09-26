@@ -32,17 +32,16 @@ def test_only_supported_lock_products_are_registered() -> None:
 def test_only_lock_platforms_are_loaded() -> None:
     init = _text("__init__.py")
 
-    for platform in ("BUTTON", "SENSOR", "BINARY_SENSOR", "SELECT", "EVENT"):
+    for platform in ("BUTTON", "SENSOR", "BINARY_SENSOR", "SELECT", "EVENT", "SWITCH"):
         assert f"Platform.{platform}" in init
 
-    for platform in ("CLIMATE", "NUMBER", "LIGHT", "SWITCH", "TEXT", "COVER"):
+    for platform in ("CLIMATE", "NUMBER", "LIGHT", "TEXT", "COVER"):
         assert f"Platform.{platform}" not in init
 
     for filename in (
         "climate.py",
         "number.py",
         "light.py",
-        "switch.py",
         "text.py",
         "cover.py",
     ):

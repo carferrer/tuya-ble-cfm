@@ -30,6 +30,7 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.SELECT,
     Platform.EVENT,
+    Platform.SWITCH,
 ]
 
 PRODUCT_B3AOULUH = "b3aouluh"

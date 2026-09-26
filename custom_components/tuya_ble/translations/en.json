@@ -242,6 +242,9 @@
             "manual_control": {
                 "name": "Manual control"
             },
+            "passage_mode_experimental": {
+                "name": "Passage mode (experimental)"
+            },
             "program": {
                 "name": "Program"
             },
