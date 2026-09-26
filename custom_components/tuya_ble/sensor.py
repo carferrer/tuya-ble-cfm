@@ -192,12 +192,15 @@ class TuyaBLEAlarmSensor(TuyaBLEEntity, RestoreSensor):
         if self._device.datapoints[self._mapping.dp_id] is not None:
             self._handle_coordinator_update()
             return
-        if (
-            self.native_value is None
-            and last_data is not None
-            and last_data.native_value in ALARM_OPTIONS
-        ):
-            self._attr_native_value = last_data.native_value
+        # Previous integration versions stored only the visible HA state, not
+        # RestoreSensor's native value. Accept that state on the first upgrade.
+        restored_value = None
+        if last_data is not None:
+            restored_value = last_data.native_value
+        elif last_state := await self.async_get_last_state():
+            restored_value = last_state.state
+        if self.native_value is None and restored_value in ALARM_OPTIONS:
+            self._attr_native_value = restored_value
             self.async_write_ha_state()
 
 

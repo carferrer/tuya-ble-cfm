@@ -53,6 +53,9 @@ def _alarm_sensor_class():
         async def async_get_last_sensor_data(self):
             return self._restored_data
 
+        async def async_get_last_state(self):
+            return self._restored_state
+
     ns = {
         "TuyaBLEEntity": FakeBase,
         "RestoreSensor": FakeRestoreSensor,
@@ -64,13 +67,14 @@ def _alarm_sensor_class():
     return ns["TuyaBLEAlarmSensor"]
 
 
-def _sensor(current_dp=None, restored="wrong_finger"):
+def _sensor(current_dp=None, restored="wrong_finger", legacy_state=None):
     cls = _alarm_sensor_class()
     coordinator = SimpleNamespace(connected=False)
     device = SimpleNamespace(datapoints={21: current_dp})
     mapping = SimpleNamespace(dp_id=21, coefficient=1, getter=None, description=SimpleNamespace(options=["wrong_finger", "wrong_password"]))
     sensor = cls(None, coordinator, device, None, mapping)
     sensor._restored_data = None if restored is None else SimpleNamespace(native_value=restored)
+    sensor._restored_state = None if legacy_state is None else SimpleNamespace(state=legacy_state)
     return sensor, coordinator, device
 
 
@@ -99,3 +103,9 @@ def test_invalid_or_absent_restored_alarm_is_ignored():
         asyncio.run(sensor.async_added_to_hass())
         assert sensor.native_value is None
         assert sensor.available is False
+
+
+def test_first_upgrade_restores_previous_visible_state():
+    sensor, coordinator, device = _sensor(restored=None, legacy_state="wrong_password")
+    asyncio.run(sensor.async_added_to_hass())
+    assert sensor.native_value == "wrong_password"
