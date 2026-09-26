@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -61,6 +62,7 @@ def test_platform_constructors_preserve_unique_id_and_suggest_correct_domain(
         return format.format(unique_id.replace("-", "_"))
 
     namespace = {
+        "asyncio": asyncio,
         "CoordinatorEntity": CoordinatorEntity,
         "generate_entity_id": generate_entity_id,
         "get_device_info": lambda device: {},
