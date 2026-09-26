@@ -51,6 +51,11 @@
                 "name": "Actualizar cerradura"
             }
         },
+        "lock": {
+            "motor_lock": {
+                "name": "Cerradura"
+            }
+        },
         "number": {
             "brightness": {
                 "name": "Brightness"

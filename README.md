@@ -53,6 +53,7 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Entidad | DP / función |
 | --- | --- |
 | Botón `bluetooth_unlock` | DP6, desbloqueo Bluetooth |
+| Entidad `lock` (`motor_lock`) | Solo `b3aouluh`: estado reportado por DP47 y comando DP6 para ambas acciones |
 | Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, ambas familias |
 | Selector `beep_volume` | DP31, volumen |
 | Sensor binario `lock_motor_state` | DP47, estado del motor |
@@ -71,6 +72,8 @@ El sensor `Alarm` muestra un estado. `Alarm events` permite reaccionar a cada re
 El sensor `alarm_lock` guarda por cerradura su último valor DP21 válido y lo recupera tras reiniciar HA. Al actualizar desde una versión anterior, también puede tomar el último registro de alarma que la integración ya había archivado localmente. Una nueva lectura DP21 tiene prioridad sobre el valor guardado. La recuperación no abre una conexión BLE ni vuelve a emitir eventos; hasta recibir una lectura nueva, el estado mostrado es el último conocido. Si una cerradura nunca ha comunicado una alarma y no hay registro previo, el sensor seguirá sin valor hasta el primer DP21.
 
 En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 500 ms tras completar esa escritura y envía DP6 `false`. Esto reproduce la doble pulsación que funcionó en la instalación, sin necesitar una automatización. El botón puede iniciar la conexión BLE aunque la cerradura esté desconectada; si falla la primera escritura, no envía la segunda. `okkyfgfs` conserva el comando DP6 único previo hasta validarlo físicamente.
+
+La entidad `lock` de `b3aouluh` muestra `locked` cuando el último DP47 Booleano recibido es `false` y `unlocked` cuando es `true`. Sin lectura previa, muestra `unknown`. Las acciones **Bloquear** y **Desbloquear** envían exactamente la misma secuencia DP6 que el botón, sin cambiar el estado de forma optimista: solo un nuevo DP47 puede actualizarlo. El comando DP6 no garantiza que **Bloquear** cierre el modo de paso libre; para eso se usa el interruptor `Modo paso libre`. Como la cerradura se desconecta para ahorrar batería, el estado visible es la última lectura conocida y puede quedar desactualizado hasta la próxima conexión o al pulsar `Actualizar cerradura`.
 
 El interruptor Modo paso libre refleja el DP33 confirmado por la cerradura. Habilitar la entidad no activa físicamente el modo. Las entidades deshabilitadas por defecto en la versión experimental se habilitan al cargar la integración; una deshabilitación manual del usuario se respeta. Se conserva el mismo `unique_id` y `entity_id`. El evento `Access` emite `passage_mode_enabled` (`event_type_id: 33`) solo cuando DP33 pasa de desactivado a activado. No se emite al cerrarlo, con informes repetidos ni al arrancar HA con el modo ya activado. La hora del evento es la de recepción en HA; no es un registro histórico de apertura.
 

@@ -30,6 +30,7 @@ PLATFORMS: list[Platform] = [
     Platform.BINARY_SENSOR,
     Platform.SELECT,
     Platform.EVENT,
+    Platform.LOCK,
     Platform.SWITCH,
 ]
 
@@ -41,7 +42,11 @@ def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
     """Load the experimental DP33 control only for the b3 lock family."""
     if device.product_id == PRODUCT_B3AOULUH:
         return PLATFORMS
-    return [platform for platform in PLATFORMS if platform != Platform.SWITCH]
+    return [
+        platform
+        for platform in PLATFORMS
+        if platform not in (Platform.SWITCH, Platform.LOCK)
+    ]
 
 # b3aouluh idle advertising can mimic the short cadence previously used to
 # catch event-like DP47 quickly. Cached-record recovery via DP69 means we no
