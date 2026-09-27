@@ -742,7 +742,7 @@ class TuyaBLEDevice:
                             ble_device_callback=lambda: self._ble_device,
                         )
                 except BleakNotFoundError:
-                    _LOGGER.error(
+                    _LOGGER.debug(
                         "%s: device not found, not in range, or poor RSSI: %s",
                         self.address,
                         self.rssi,
@@ -769,7 +769,7 @@ class TuyaBLEDevice:
                         )
                     except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
                         self._client = None
-                        _LOGGER.error("%s: starting notifications failed",
+                        _LOGGER.debug("%s: starting notifications failed",
                                       self.address, exc_info=True)
                         continue
                 else:
@@ -786,14 +786,14 @@ class TuyaBLEDevice:
                             True,
                         ):
                             self._client = None
-                            _LOGGER.error(
+                            _LOGGER.debug(
                                 "%s: Sending device info request failed",
                                 self.address,
                             )
                             continue
                     except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
                         self._client = None
-                        _LOGGER.error("%s: Sending device info request failed",
+                        _LOGGER.debug("%s: Sending device info request failed",
                                       self.address, exc_info=True)
                         continue
                 else:
@@ -809,14 +809,14 @@ class TuyaBLEDevice:
                             True,
                         ):
                             self._client = None
-                            _LOGGER.error(
+                            _LOGGER.debug(
                                 "%s: Sending pairing request failed",
                                 self.address,
                             )
                             continue
                     except:  # [BLEAK_EXCEPTIONS, BleakNotFoundError]:
                         self._client = None
-                        _LOGGER.error("%s: Sending pairing request failed",
+                        _LOGGER.debug("%s: Sending pairing request failed",
                                       self.address, exc_info=True)
                         continue
                 else:
