@@ -314,7 +314,6 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                 credentials.get(CONF_FUNCTIONS, []),
                 credentials.get(CONF_STATUS_RANGE, []),
             )
-            _LOGGER.debug("Retrieved: %s", result)
             if save_data:
                 if item:
                     self._data.update(item.login)
