@@ -16,7 +16,7 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from homeassistant.helpers.entity import EntityCategory
 
 from .const import DOMAIN
-from .devices import TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
+from .devices import PRODUCT_7A4XVBTT, TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
 from .tuya_ble import TuyaBLEDataPointType, TuyaBLEDevice
 
 
@@ -36,7 +36,7 @@ LOCK_MOTOR = [
 ]
 
 mapping = {
-    "ms": {"okkyfgfs": LOCK_MOTOR},
+    "ms": {"okkyfgfs": LOCK_MOTOR, PRODUCT_7A4XVBTT: LOCK_MOTOR},
     "jtmspro": {"b3aouluh": LOCK_MOTOR},
 }
 
