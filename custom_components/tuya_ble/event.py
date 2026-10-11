@@ -27,7 +27,13 @@ from .access import (
 from .alarm_event import TuyaBLEAlarmEvent
 from .connection_policy import setup_connection_policy
 from .const import DOMAIN
-from .devices import PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS, TuyaBLEData, get_device_info
+from .devices import (
+    PRODUCT_7A4XVBTT,
+    PRODUCT_B3AOULUH,
+    PRODUCT_OKKYFGFS,
+    TuyaBLEData,
+    get_device_info,
+)
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 
@@ -230,7 +236,11 @@ async def async_setup_entry(
         entry.async_on_unload(unsubscribe)
     entry.async_on_unload(entry.add_update_listener(_async_connection_options_updated))
 
-    if data.device.product_id not in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS):
+    if data.device.product_id not in (
+        PRODUCT_B3AOULUH,
+        PRODUCT_OKKYFGFS,
+        PRODUCT_7A4XVBTT,
+    ):
         return
 
     async_add_entities([
