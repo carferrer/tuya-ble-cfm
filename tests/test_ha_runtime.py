@@ -11,6 +11,8 @@ from homeassistant.const import CONF_ADDRESS, Platform
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from custom_components.tuya_ble import _platforms_for_device, async_setup_entry
+from custom_components.tuya_ble import binary_sensor, button, select, sensor
+from custom_components.tuya_ble.devices import get_product_info_by_ids
 
 
 @pytest.mark.parametrize(
@@ -36,6 +38,7 @@ def test_platform_modules_import_with_home_assistant(module):
     (
         ("b3aouluh", True, True),
         ("okkyfgfs", True, False),
+        ("7a4xvbtt", False, False),
         ("unsupported", False, False),
     ),
 )
@@ -45,6 +48,23 @@ def test_supported_lock_platforms(product_id, has_lock, has_switch):
     assert Platform.EVENT in platforms
     assert (Platform.LOCK in platforms) is has_lock
     assert (Platform.SWITCH in platforms) is has_switch
+
+
+def test_7a4xvbtt_exposes_reports_without_unverified_write_controls():
+    """Accept the new PID while keeping DP6 and DP33 controls unavailable."""
+    device = SimpleNamespace(category="ms", product_id="7a4xvbtt")
+
+    assert get_product_info_by_ids(device.category, device.product_id) is not None
+    assert _platforms_for_device(device) == [
+        Platform.BUTTON,
+        Platform.SENSOR,
+        Platform.BINARY_SENSOR,
+        Platform.EVENT,
+    ]
+    assert button.get_mapping_by_device(device) == []
+    assert select.get_mapping_by_device(device) == []
+    assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
+    assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {47}
 
 
 def test_setup_retries_when_ble_device_is_missing():
