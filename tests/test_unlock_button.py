@@ -1,4 +1,4 @@
-"""Verify the two product-specific DP6 pulses."""
+"""Verify the product-specific DP6 commands."""
 
 from __future__ import annotations
 
@@ -47,6 +47,8 @@ def _button(product="b3aouluh", initial=False, fail_first=False):
         "FakeBase": FakeBase,
         "asyncio": SimpleNamespace(Lock=asyncio.Lock, sleep=sleep),
         "PRODUCT_B3AOULUH": "b3aouluh",
+        "PRODUCT_OKKYFGFS": "okkyfgfs",
+        "PRODUCT_7A4XVBTT": "7a4xvbtt",
         "TuyaBLEDataPointType": SimpleNamespace(DT_BOOL="bool", DT_RAW="raw"),
         "UNLOCK_PULSE_SECONDS": 0.5,
         "OKKY_UNLOCK_PAYLOAD": b"\x01\x01",
@@ -81,8 +83,24 @@ def test_okky_sends_two_raw_unlock_commands_half_a_second_apart():
     assert delays == [0.5]
 
 
+def test_new_lock_sends_one_raw_unlock_command_without_retry():
+    button, dp, delays = _button(product="7a4xvbtt")
+    asyncio.run(button.async_press())
+    assert dp.sent == [b"\x01\x01"]
+    assert delays == []
+
+
 def test_okky_rejects_a_bool_dp6_cache_instead_of_sending_wrong_type():
     button, dp, delays = _button(product="okkyfgfs")
+    dp.type = "bool"
+    with pytest.raises(RuntimeError, match="Expected a raw DP6"):
+        asyncio.run(button.async_press())
+    assert dp.sent == []
+    assert delays == []
+
+
+def test_new_lock_rejects_non_raw_dp6_before_write():
+    button, dp, delays = _button(product="7a4xvbtt")
     dp.type = "bool"
     with pytest.raises(RuntimeError, match="Expected a raw DP6"):
         asyncio.run(button.async_press())
@@ -95,6 +113,14 @@ def test_failed_first_write_does_not_send_second_half():
     with pytest.raises(RuntimeError, match="BLE write failed"):
         asyncio.run(button.async_press())
     assert dp.sent == [True]
+    assert delays == []
+
+
+def test_new_lock_failed_write_does_not_retry():
+    button, dp, delays = _button(product="7a4xvbtt", fail_first=True)
+    with pytest.raises(RuntimeError, match="BLE write failed"):
+        asyncio.run(button.async_press())
+    assert dp.sent == [b"\x01\x01"]
     assert delays == []
 
 
