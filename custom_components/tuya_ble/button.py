@@ -103,7 +103,7 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
         return True
 
     async def async_press(self) -> None:
-        """Send this product\'s DP6 unlock command."""
+        """Send this product's DP6 unlock command."""
         await async_press_bluetooth_unlock(self._device)
 
 
