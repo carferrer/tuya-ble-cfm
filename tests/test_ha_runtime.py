@@ -50,8 +50,8 @@ def test_supported_lock_platforms(product_id, has_lock, has_switch):
     assert (Platform.SWITCH in platforms) is has_switch
 
 
-def test_7a4xvbtt_exposes_reports_without_unverified_write_controls():
-    """Accept the new PID while keeping DP6 and DP33 controls unavailable."""
+def test_7a4xvbtt_exposes_reports_and_only_the_experimental_dp6_button():
+    """Keep DP33, lock, and unrelated write controls unavailable."""
     device = SimpleNamespace(category="ms", product_id="7a4xvbtt")
 
     assert get_product_info_by_ids(device.category, device.product_id) is not None
@@ -61,7 +61,7 @@ def test_7a4xvbtt_exposes_reports_without_unverified_write_controls():
         Platform.BINARY_SENSOR,
         Platform.EVENT,
     ]
-    assert button.get_mapping_by_device(device) == []
+    assert {item.dp_id for item in button.get_mapping_by_device(device)} == {6}
     assert select.get_mapping_by_device(device) == []
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {47}
