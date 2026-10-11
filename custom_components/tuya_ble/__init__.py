@@ -57,6 +57,7 @@ def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
             Platform.BINARY_SENSOR,
             Platform.EVENT,
             Platform.LOCK,
+            Platform.SWITCH,
         ]
     return [
         platform
