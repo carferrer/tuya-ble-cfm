@@ -27,6 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 
 PRODUCT_B3AOULUH = "b3aouluh"
 PRODUCT_OKKYFGFS = "okkyfgfs"
+PRODUCT_7A4XVBTT = "7a4xvbtt"
 DP_GET_RECORDS = 69
 DP_GET_RECORDS_REQUEST_ACTION = 0x01
 MOBILE_CENTRAL_ID = b"\xff\xff"
@@ -250,11 +251,12 @@ class TuyaBLECategoryInfo:
     info: TuyaBLEProductInfo | None = None
 
 
-# Deliberately limited to the two product IDs physically used and tested.
+# Limited to known product IDs; 7a4xvbtt is read-only pending field tests.
 devices_database: dict[str, TuyaBLECategoryInfo] = {
     "ms": TuyaBLECategoryInfo(
         products={
             "okkyfgfs": TuyaBLEProductInfo(name="P196_V Smart Lock"),
+            PRODUCT_7A4XVBTT: TuyaBLEProductInfo(name="Smart Lock"),
         },
     ),
     "jtmspro": TuyaBLECategoryInfo(
