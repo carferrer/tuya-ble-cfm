@@ -21,7 +21,7 @@ jobs:
           args: check --output-format=github custom_components/tuya_ble tests
 
   pytest:
-    name: Pytest smoke tests
+    name: Pytest with Home Assistant
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -30,7 +30,8 @@ jobs:
         uses: actions/setup-python@v7
         with:
           python-version: "3.14"
-      - name: Install pytest
-        run: python -m pip install --upgrade pytest pycryptodome
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-test.txt
       - name: Run tests
         run: python -m pytest -q
+

@@ -1,0 +1,72 @@
+"""Exercise the installed integration against real Home Assistant imports."""
+
+import asyncio
+import importlib
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+from homeassistant.const import CONF_ADDRESS, Platform
+from homeassistant.exceptions import ConfigEntryNotReady
+
+from custom_components.tuya_ble import _platforms_for_device, async_setup_entry
+
+
+@pytest.mark.parametrize(
+    "module",
+    (
+        "binary_sensor",
+        "button",
+        "config_flow",
+        "event",
+        "lock",
+        "select",
+        "sensor",
+        "switch",
+    ),
+)
+def test_platform_modules_import_with_home_assistant(module):
+    """Catch incompatible HA APIs and missing runtime dependencies."""
+    importlib.import_module(f"custom_components.tuya_ble.{module}")
+
+
+@pytest.mark.parametrize(
+    ("product_id", "has_lock", "has_switch"),
+    (
+        ("b3aouluh", True, True),
+        ("okkyfgfs", True, False),
+        ("unsupported", False, False),
+    ),
+)
+def test_supported_lock_platforms(product_id, has_lock, has_switch):
+    """Keep the actual HA platform routing for each lock family."""
+    platforms = _platforms_for_device(SimpleNamespace(product_id=product_id))
+    assert Platform.EVENT in platforms
+    assert (Platform.LOCK in platforms) is has_lock
+    assert (Platform.SWITCH in platforms) is has_switch
+
+
+def test_setup_retries_when_ble_device_is_missing():
+    """Exercise the real setup entry point without requiring BLE hardware."""
+    address = "AA:BB:CC:DD:EE:FF"
+    entry = SimpleNamespace(data={CONF_ADDRESS: address})
+    hass = MagicMock()
+
+    with (
+        patch(
+            "custom_components.tuya_ble.bluetooth.async_ble_device_from_address",
+            return_value=None,
+        ) as find_cached_device,
+        patch(
+            "custom_components.tuya_ble.get_device",
+            new_callable=AsyncMock,
+            return_value=None,
+        ) as find_device,
+        pytest.raises(ConfigEntryNotReady, match="Could not find Tuya BLE device"),
+    ):
+        asyncio.run(async_setup_entry(hass, entry))
+
+    find_cached_device.assert_called_once_with(hass, address, True)
+    find_device.assert_awaited_once_with(address)
+
