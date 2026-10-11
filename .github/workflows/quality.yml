@@ -21,15 +21,19 @@ jobs:
           args: check --output-format=github custom_components/tuya_ble tests
 
   pytest:
-    name: Pytest with Home Assistant
+    name: Pytest with Home Assistant (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.14", "3.15"]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
-          python-version: "3.15"
+          python-version: ${{ matrix.python-version }}
       - name: Install test dependencies
         run: python -m pip install -r requirements-test.txt
       - name: Run tests
