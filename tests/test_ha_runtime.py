@@ -111,7 +111,8 @@ def test_country_lookup_does_not_block_home_assistant_loop():
     flow = SimpleNamespace(
         hass=FakeHass(), async_show_form=lambda **kwargs: kwargs
     )
-    with patch.object(config_flow.pycountry.countries, "get", side_effect=country_lookup):
+    with patch.object(config_flow.pycountry.countries, "get", side_effect=country_lookup) as lookup:
         result = asyncio.run(config_flow._show_login_form(flow, {}, {}, {}))
+    lookup.assert_called_once_with(alpha_2="ES")
     assert result["step_id"] == "login"
     assert result["data_schema"].schema
