@@ -225,12 +225,15 @@ def test_motor_lock_platform_loads_for_both_families_and_switch_only_for_b3():
         SENSOR = 2
         SWITCH = 3
         LOCK = 4
+        BINARY_SENSOR = 5
+        EVENT = 6
 
     ns = {
         "Platform": Platform,
         "PLATFORMS": [Platform.BUTTON, Platform.SENSOR, Platform.SWITCH, Platform.LOCK],
         "PRODUCT_B3AOULUH": "b3aouluh",
         "PRODUCT_OKKYFGFS": "okkyfgfs",
+        "PRODUCT_7A4XVBTT": "7a4xvbtt",
     }
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "__init__.py", "exec",
                  flags=__import__("__future__").annotations.compiler_flag), ns)
@@ -238,6 +241,9 @@ def test_motor_lock_platform_loads_for_both_families_and_switch_only_for_b3():
     assert select(SimpleNamespace(product_id="b3aouluh")) == ns["PLATFORMS"]
     assert select(SimpleNamespace(product_id="okkyfgfs")) == [
         Platform.BUTTON, Platform.SENSOR, Platform.LOCK
+    ]
+    assert select(SimpleNamespace(product_id="7a4xvbtt")) == [
+        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT
     ]
     assert select(SimpleNamespace(product_id="unsupported")) == [
         Platform.BUTTON, Platform.SENSOR
