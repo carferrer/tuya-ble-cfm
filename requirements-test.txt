@@ -1,0 +1,8 @@
+homeassistant==2026.10.1
+pytest==9.1.1
+pycryptodome
+bleak-retry-connector==4.7.1
+tuya-device-handlers==0.0.31
+tuya-iot-py-sdk==0.6.6
+pycountry>23.0.0
+
