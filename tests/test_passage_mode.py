@@ -243,7 +243,8 @@ def test_motor_lock_platform_loads_for_both_families_and_switch_only_for_b3():
         Platform.BUTTON, Platform.SENSOR, Platform.LOCK
     ]
     assert select(SimpleNamespace(product_id="7a4xvbtt")) == [
-        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT
+        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT,
+        Platform.LOCK,
     ]
     assert select(SimpleNamespace(product_id="unsupported")) == [
         Platform.BUTTON, Platform.SENSOR
