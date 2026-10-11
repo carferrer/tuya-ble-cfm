@@ -51,7 +51,7 @@ def _button(product="b3aouluh", initial=False, fail_first=False):
         "PRODUCT_7A4XVBTT": "7a4xvbtt",
         "TuyaBLEDataPointType": SimpleNamespace(DT_BOOL="bool", DT_RAW="raw"),
         "UNLOCK_PULSE_SECONDS": 0.5,
-        "OKKY_UNLOCK_PAYLOAD": b"\x01\x01",
+        "RAW_UNLOCK_MEMBER_1_PAYLOAD": b"\x01\x01",
         "HomeAssistantError": RuntimeError,
     }
     module = ast.fix_missing_locations(ast.Module(body=[helper, cls], type_ignores=[]))
