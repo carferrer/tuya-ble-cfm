@@ -50,7 +50,10 @@ def _lock(product="b3aouluh"):
         if isinstance(node, ast.AsyncFunctionDef) and node.name == "async_setup_entry"
     )
     namespace.update(
-        DOMAIN="tuya_ble", PRODUCT_B3AOULUH="b3aouluh", PRODUCT_OKKYFGFS="okkyfgfs"
+        DOMAIN="tuya_ble",
+        PRODUCT_B3AOULUH="b3aouluh",
+        PRODUCT_OKKYFGFS="okkyfgfs",
+        PRODUCT_7A4XVBTT="7a4xvbtt",
     )
     module = ast.fix_missing_locations(ast.Module(body=[cls, setup], type_ignores=[]))
     exec(
@@ -69,14 +72,14 @@ def _lock(product="b3aouluh"):
     asyncio.run(namespace["async_setup_entry"](
         hass, SimpleNamespace(entry_id="entry"), entities.extend
     ))
-    if product in ("b3aouluh", "okkyfgfs"):
+    if product in ("b3aouluh", "okkyfgfs", "7a4xvbtt"):
         assert len(entities) == 1
     else:
         assert not entities
     return entities[0] if entities else None, device, dp_cache, commands
 
 
-@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs"])
+@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt"])
 def test_motor_reports_set_lock_state_without_command_guessing(product):
     entity, device, cache, commands = _lock(product)
     assert entity.domain == "lock"
@@ -94,7 +97,7 @@ def test_motor_reports_set_lock_state_without_command_guessing(product):
     assert entity._attr_is_locked is False
 
 
-@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs"])
+@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt"])
 def test_initial_state_uses_cached_motor_report_only(product):
     entity, _, cache, _ = _lock(product)
     cache[47] = SimpleNamespace(id=47, type="bool", value=False)
@@ -102,7 +105,7 @@ def test_initial_state_uses_cached_motor_report_only(product):
     assert entity._attr_is_locked is True
 
 
-@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs"])
+@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt"])
 def test_restored_state_wins_over_provisional_transport_cache(product):
     entity, device, cache, _ = _lock(product)
     cache[47] = SimpleNamespace(id=47, type="bool", value=True)
