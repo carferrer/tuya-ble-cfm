@@ -97,7 +97,8 @@ def code():
         "SwitchEntityDescription": lambda **kw: SimpleNamespace(**kw),
         "TuyaBLEDataPointType": DPType, "HomeAssistantError": HAError,
         "callback": lambda fn: fn, "DOMAIN": "tuya_ble",
-        "PRODUCT_B3AOULUH": "b3aouluh", "_LOGGER": SimpleNamespace(warning=lambda *a: None),
+        "PRODUCT_B3AOULUH": "b3aouluh",
+        "PRODUCT_7A4XVBTT": "7a4xvbtt", "_LOGGER": SimpleNamespace(warning=lambda *a: None),
         "er": SimpleNamespace(
             async_get=lambda hass: SimpleNamespace(async_get_entity_id=lambda *args: None),
             RegistryEntryDisabler=SimpleNamespace(INTEGRATION="integration"),
@@ -157,6 +158,32 @@ def test_command_waits_for_device_confirmation_and_can_reverse(code):
     assert switch._confirmation is None
 
 
+def test_7a4xvbtt_inverts_report_restore_and_command(code):
+    device = FakeDevice(product="7a4xvbtt", initial=True)
+    device._cfm_lock_state = SimpleNamespace(get=lambda dp_id: True)
+    switch = make_switch(code, device)
+    assert switch.available is True
+    assert switch._attr_is_on is False  # DP33 true means automatic lock
+
+    async def report(value):
+        assert switch._attr_is_on is not (not value)
+        device.report(value)
+
+    device.datapoints[33].on_send = report
+    asyncio.run(switch.async_turn_on())
+    assert switch._attr_is_on is True
+    asyncio.run(switch.async_turn_off())
+    assert switch._attr_is_on is False
+    assert device.datapoints[33].sent == [False, True]
+
+
+def test_7a4xvbtt_unknown_saved_state_is_not_inverted_to_on(code):
+    device = FakeDevice(product="7a4xvbtt")
+    device._cfm_lock_state = SimpleNamespace(get=lambda dp_id: None)
+    switch = make_switch(code, device)
+    assert switch._attr_is_on is None
+
+
 def test_unconfirmed_command_fails_without_optimistic_state(code):
     device = FakeDevice()
     switch = make_switch(code, device)
@@ -172,7 +199,7 @@ def test_unconfirmed_command_fails_without_optimistic_state(code):
 def test_wrong_product_or_wrong_dp_type_never_writes(code):
     other = FakeDevice(product="okkyfgfs")
     switch = make_switch(code, other)
-    with pytest.raises(HAError, match="limited"):
+    with pytest.raises(HAError, match="unavailable"):
         asyncio.run(switch.async_turn_on())
     assert other.datapoints[33].sent == []
 
@@ -185,8 +212,8 @@ def test_wrong_product_or_wrong_dp_type_never_writes(code):
     assert b3.datapoints[33].sent == []
 
 
-def test_setup_only_adds_control_for_b3(code):
-    for product, expected in [("b3aouluh", 1), ("okkyfgfs", 0)]:
+def test_setup_only_adds_control_for_supported_dp33_products(code):
+    for product, expected in [("b3aouluh", 1), ("7a4xvbtt", 1), ("okkyfgfs", 0)]:
         device = FakeDevice(product=product)
         data = SimpleNamespace(device=device, product=None, coordinator=None)
         hass = SimpleNamespace(data={"tuya_ble": {"entry": data}})
@@ -214,7 +241,7 @@ def test_previous_default_disabled_entity_is_enabled_but_user_choice_is_kept(cod
         assert updates == [("switch.lock_passage_mode", {"disabled_by": None})]
 
 
-def test_motor_lock_platform_loads_for_both_families_and_switch_only_for_b3():
+def test_lock_and_passage_switch_platforms_load_for_supported_families():
     tree = ast.parse((ROOT / "__init__.py").read_text(encoding="utf-8"))
     fn = next(
         node for node in tree.body
@@ -244,7 +271,7 @@ def test_motor_lock_platform_loads_for_both_families_and_switch_only_for_b3():
     ]
     assert select(SimpleNamespace(product_id="7a4xvbtt")) == [
         Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT,
-        Platform.LOCK,
+        Platform.LOCK, Platform.SWITCH,
     ]
     assert select(SimpleNamespace(product_id="unsupported")) == [
         Platform.BUTTON, Platform.SENSOR
