@@ -21,7 +21,12 @@ from .tuya_ble import TuyaBLEDevice
 
 from .cloud import HASSTuyaBLEDeviceManager
 from .const import DOMAIN
-from .devices import TuyaBLECoordinator, TuyaBLEData, get_device_product_info
+from .devices import (
+    PRODUCT_7A4XVBTT,
+    TuyaBLECoordinator,
+    TuyaBLEData,
+    get_device_product_info,
+)
 from .lock_power_saver import enable_lock_power_saver
 from .lock_state import TuyaBLELockState
 
@@ -40,11 +45,18 @@ PRODUCT_OKKYFGFS = "okkyfgfs"
 
 
 def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
-    """Load motor locks for both families and passage control only for b3."""
+    """Load only the controls verified for each lock product."""
     if device.product_id == PRODUCT_B3AOULUH:
         return PLATFORMS
     if device.product_id == PRODUCT_OKKYFGFS:
         return [platform for platform in PLATFORMS if platform != Platform.SWITCH]
+    if device.product_id == PRODUCT_7A4XVBTT:
+        return [
+            Platform.BUTTON,
+            Platform.SENSOR,
+            Platform.BINARY_SENSOR,
+            Platform.EVENT,
+        ]
     return [
         platform
         for platform in PLATFORMS
@@ -353,7 +365,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 triggered = True
                 trigger_reason = "payload_change"
 
-        if not triggered and delta is not None and b3_cooldown_remaining <= 0:
+        if (
+            not triggered
+            and device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS)
+            and delta is not None
+            and b3_cooldown_remaining <= 0
+        ):
             if device.product_id == PRODUCT_OKKYFGFS:
                 quiet_interval = OKKY_ACTIVITY_QUIET_INTERVAL
                 fast_interval = OKKY_ACTIVITY_FAST_INTERVAL
