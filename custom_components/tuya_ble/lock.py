@@ -9,7 +9,13 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .button import async_press_bluetooth_unlock
 from .const import DOMAIN
-from .devices import PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS, TuyaBLEData, TuyaBLEEntity
+from .devices import (
+    PRODUCT_7A4XVBTT,
+    PRODUCT_B3AOULUH,
+    PRODUCT_OKKYFGFS,
+    TuyaBLEData,
+    TuyaBLEEntity,
+)
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType
 
 DP_MOTOR_STATE = 47
@@ -78,5 +84,9 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
-    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS):
+    if data.device.product_id in (
+        PRODUCT_B3AOULUH,
+        PRODUCT_OKKYFGFS,
+        PRODUCT_7A4XVBTT,
+    ):
         async_add_entities([TuyaBLEMotorLock(hass, data)])
