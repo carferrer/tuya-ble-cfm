@@ -65,7 +65,7 @@ def test_7a4xvbtt_exposes_reports_and_tested_dp6_controls():
     assert {item.dp_id for item in button.get_mapping_by_device(device)} == {6}
     assert select.get_mapping_by_device(device) == []
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
-    assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {47}
+    assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
 
 
 def test_setup_retries_when_ble_device_is_missing():
