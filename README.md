@@ -23,8 +23,11 @@ Se han probado físicamente la recuperación de varias aperturas, los accesos po
 | --- | --- | --- | --- |
 | `b3aouluh` | Smart Lock / `jtmspro` | Sí | Sí |
 | `okkyfgfs` | P196_V / `ms` | Sí | Aperturas acumuladas recuperadas en las pruebas; alarmas de entrega irregular, también en Tuya; DP69 no confirmado |
+| `7a4xvbtt` | Smart Lock / `ms` | Lectura preliminar; sin orden de apertura ni control de paso libre | Access y Alarm events preparados para los DP recibidos; recuperación pendiente de prueba física |
 
-La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. La compatibilidad de otros productos Tuya no está garantizada.
+La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. `7a4xvbtt` se ha añadido a partir de sus propiedades Tuya, pero aún no se ha probado con Home Assistant. La compatibilidad de otros productos Tuya no está garantizada.
+
+En `7a4xvbtt` se leen batería porcentual (DP8), última alarma (DP21), estado del motor (DP47), accesos (DP12/13/14/15/19/55/62) y alarmas recibidas. También se ofrecen la conexión BLE, RSSI, última conexión, intervalo y el botón de actualización manual. **No se ofrecen** el botón de apertura DP6, la entidad `lock` ni un interruptor de paso libre: el listado de propiedades no incluye un valor DP6 de ejemplo y llama `automatic_lock` al DP33. Los DP36 (`auto_lock_time`) y DP46 (`manual_lock`) tampoco se escriben. La interpretación de las alarmas numéricas y la recuperación de eventos pendientes deben validarse en una prueba física; no se presupone DP69 para este producto.
 
 ## Instalación y actualización
 
@@ -52,18 +55,18 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 
 | Entidad | DP / función |
 | --- | --- |
-| Botón `bluetooth_unlock` | DP6, desbloqueo Bluetooth |
-| Entidad `lock` (`motor_lock`) | Ambas familias: estado reportado por DP47 y comando DP6 para ambas acciones |
+| Botón `bluetooth_unlock` | DP6, desbloqueo Bluetooth; `b3aouluh` y `okkyfgfs` |
+| Entidad `lock` (`motor_lock`) | `b3aouluh` y `okkyfgfs`: estado reportado por DP47 y comando DP6 para ambas acciones |
 | Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, ambas familias |
 | Selector `beep_volume` | DP31, volumen |
 | Sensor binario `lock_motor_state` | DP47, estado del motor |
 | Sensor binario `ble_connection` | Sesión Bluetooth emparejada activa con HA, ambas familias |
 | Sensor `Alarm` | DP21, último valor de alarma recibido |
-| Batería | DP8 en `okkyfgfs`; DP9 `battery_state` en `b3aouluh` |
+| Batería | DP8 en `okkyfgfs` y `7a4xvbtt`; DP9 `battery_state` en `b3aouluh` |
 | RSSI | Diagnóstico de señal |
-| Evento `Access` | Aperturas DP12/13/14/15/19/55/62/63, ambas familias si la cerradura los reporta |
+| Evento `Access` | Aperturas DP12/13/14/15/19/55/62/63, cuando la cerradura los reporta |
 | Sensor `Last access` | Hora de la apertura más reciente, ambas familias |
-| Evento `Alarm events` | Registros individuales DP21, ambas familias |
+| Evento `Alarm events` | Registros individuales DP21, cuando la cerradura los reporta |
 | Interruptor `Modo paso libre` | DP33, solo `b3aouluh`; entidad habilitada por defecto |
 | Sensor `Last connected` | Última conexión BLE emparejada, ambas familias |
 | Sensor `Update interval` | Intervalo periódico en minutos; 0 en los otros modos, ambas familias |
@@ -96,6 +99,8 @@ La política se configura por cerradura en las opciones de la integración.
 | Siempre conectada (`keep_alive`) | Desactiva la desconexión por inactividad y utiliza un supervisor de reconexión cada 30 segundos. |
 
 Intervalos disponibles: **1, 2, 5, 10, 15, 30 y 60 minutos; 5, 12 y 24 horas**. El valor predeterminado del intervalo es 5 minutos y se utiliza en modo periódico.
+
+En `7a4xvbtt` aún no se ha caracterizado el patrón de anuncios BLE. Aunque se elija «Detectar actividad», la integración no inicia conexiones a partir de sus anuncios: para probar la recuperación de eventos usa **Sincronización periódica** o el botón **Actualizar cerradura**. Así se evita aplicar a este modelo los umbrales medidos para otras cerraduras.
 
 El ahorro utiliza desconexión por inactividad, con un plazo base de 30 segundos y ajustes según la operación y el modo. Las entidades de eventos aprovechan las conexiones existentes; no añaden sondeos propios.
 
@@ -305,7 +310,7 @@ El interruptor solo acepta un DP33 Booleano previamente reportado. La escritura 
 
 ## Validación
 
-La suite actual contiene **126 pruebas**. Cubre el parser BLE, el alcance de los productos, las políticas de conexión, los IDs de entidades, las acciones y estados de `lock` en ambas familias, la restauración de alarmas por cerradura y el comportamiento de los eventos: tipos, fechas, duplicados, carga inicial y recargas. También se comprueba con Ruff, Hassfest y HACS.
+La suite cubre el parser BLE, el alcance de los productos, las políticas de conexión, los IDs de entidades, las acciones y estados de `lock` en ambas familias, la restauración de alarmas por cerradura y el comportamiento de los eventos: tipos, fechas, duplicados, carga inicial y recargas. También se comprueba con Ruff, Hassfest y HACS.
 
 Las pruebas de entidades utilizan dobles ligeros de los límites de Home Assistant. Se complementan con las pruebas físicas descritas arriba; no equivalen a haber probado todos los tipos de evento en todas las cerraduras.
 
