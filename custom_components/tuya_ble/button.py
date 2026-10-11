@@ -39,7 +39,7 @@ LOCK_BUTTONS = [
     )
 ]
 UNLOCK_PULSE_SECONDS = 0.5
-OKKY_UNLOCK_PAYLOAD = b"\x01\x01"
+RAW_UNLOCK_MEMBER_1_PAYLOAD = b"\x01\x01"
 
 
 async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
@@ -64,10 +64,10 @@ async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
             )
             if datapoint.type != TuyaBLEDataPointType.DT_RAW:
                 raise HomeAssistantError("Expected a raw DP6 on this lock")
-            await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
+            await datapoint.set_value(RAW_UNLOCK_MEMBER_1_PAYLOAD)
             if device.product_id == PRODUCT_OKKYFGFS:
                 await asyncio.sleep(UNLOCK_PULSE_SECONDS)
-                await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
+                await datapoint.set_value(RAW_UNLOCK_MEMBER_1_PAYLOAD)
         else:
             raise HomeAssistantError("Unsupported DP6 unlock product")
 
