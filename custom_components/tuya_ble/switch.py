@@ -1,4 +1,4 @@
-"""Passage-mode control for the physically tested b3aouluh lock."""
+"""Passage-mode control for supported locks with product-specific DP33 polarity."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
-from .devices import PRODUCT_B3AOULUH, TuyaBLEData, TuyaBLEEntity
+from .devices import PRODUCT_7A4XVBTT, PRODUCT_B3AOULUH, TuyaBLEData, TuyaBLEEntity
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 _LOGGER = logging.getLogger(__name__)
@@ -22,7 +22,7 @@ CONFIRM_TIMEOUT_SECONDS = 15
 
 
 class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
-    """Control the lock's physically verified free-passage mode."""
+    """Control free-passage mode using each lock family's DP33 polarity."""
 
     _attr_entity_registry_enabled_default = True
 
@@ -41,6 +41,14 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
         self._command_lock = asyncio.Lock()
         self._confirmation: asyncio.Future[bool] | None = None
         self._desired_state: bool | None = None
+
+    def _passage_state(self, dp33_value: bool) -> bool:
+        """The 7a4xvbtt app enables free passage by disabling automatic locking."""
+        return (
+            not dp33_value
+            if self._device.product_id == PRODUCT_7A4XVBTT
+            else dp33_value
+        )
 
     @property
     def available(self) -> bool:
@@ -62,7 +70,7 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
                 or type(dp.value) is not bool
             ):
                 continue
-            self._attr_is_on = dp.value
+            self._attr_is_on = self._passage_state(dp.value)
             self.async_write_ha_state()
             if (
                 self._confirmation is not None
@@ -81,15 +89,19 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
         self.async_on_remove(self._device.register_callback(self._handle_updates))
         lock_state = getattr(self._device, "_cfm_lock_state", None)
         if lock_state is not None:
-            self._attr_is_on = lock_state.get(DP_PASSAGE_MODE_CANDIDATE)
+            saved = lock_state.get(DP_PASSAGE_MODE_CANDIDATE)
+            self._attr_is_on = None if saved is None else self._passage_state(saved)
             return
         dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
         if dp is not None and dp.type == TuyaBLEDataPointType.DT_BOOL:
-            self._attr_is_on = bool(dp.value)
+            self._attr_is_on = self._passage_state(bool(dp.value))
 
     async def _set_mode(self, desired: bool) -> None:
-        if self._device.product_id != PRODUCT_B3AOULUH:
-            raise HomeAssistantError("Passage-mode test is limited to b3aouluh")
+        if self._device.product_id not in (PRODUCT_B3AOULUH, PRODUCT_7A4XVBTT):
+            raise HomeAssistantError("Passage-mode control is unavailable for this lock")
+        dp33_desired = (
+            not desired if self._device.product_id == PRODUCT_7A4XVBTT else desired
+        )
 
         async with self._command_lock:
             dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
@@ -100,11 +112,11 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
                 raise HomeAssistantError("Lock has not reported a Boolean DP33")
             confirmation = asyncio.get_running_loop().create_future()
             self._confirmation = confirmation
-            self._desired_state = desired
+            self._desired_state = dp33_desired
             try:
                 # set_value changes the transport cache before writing. The
                 # callback above accepts only a subsequent device report.
-                await dp.set_value(desired)
+                await dp.set_value(dp33_desired)
                 await asyncio.wait_for(confirmation, CONFIRM_TIMEOUT_SECONDS)
             except TimeoutError as err:
                 _LOGGER.warning(
@@ -134,7 +146,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
-    if data.device.product_id == PRODUCT_B3AOULUH:
+    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_7A4XVBTT):
         registry = er.async_get(hass)
         entity_id = registry.async_get_entity_id(
             "switch", DOMAIN, f"{data.device.device_id}-passage_mode_experimental"
