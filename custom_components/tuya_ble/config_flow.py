@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 import logging
 import pycountry
 from typing import Any
@@ -106,7 +107,7 @@ async def _try_login(
     return None
 
 
-def _show_login_form(
+async def _show_login_form(
     flow: FlowHandler,
     user_input: dict[str, Any],
     errors: dict[str, str],
@@ -123,7 +124,9 @@ def _show_login_form(
 
     def_country_name: str | None = None
     try:
-        def_country = pycountry.countries.get(alpha_2=flow.hass.config.country)
+        def_country = await flow.hass.async_add_executor_job(
+            partial(pycountry.countries.get, alpha_2=flow.hass.config.country)
+        )
         if def_country:
             def_country_name = def_country.name
     except:
@@ -239,7 +242,7 @@ class TuyaBLEOptionsFlow(OptionsFlowWithConfigEntry):
             user_input = {}
             user_input.update(self.config_entry.options)
 
-        return _show_login_form(
+        return await _show_login_form(
             self,
             user_input,
             errors,
@@ -321,7 +324,7 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
             if self._data is not None and len(self._data) > 0:
                 user_input.update(self._data)
 
-        return _show_login_form(self, user_input, errors, placeholders)
+        return await _show_login_form(self, user_input, errors, placeholders)
 
     async def async_step_device(
         self, user_input: dict[str, Any] | None = None
