@@ -13,7 +13,14 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
-from .devices import PRODUCT_B3AOULUH, TuyaBLEData, TuyaBLEEntity, TuyaBLEProductInfo
+from .devices import (
+    PRODUCT_7A4XVBTT,
+    PRODUCT_B3AOULUH,
+    PRODUCT_OKKYFGFS,
+    TuyaBLEData,
+    TuyaBLEEntity,
+    TuyaBLEProductInfo,
+)
 from .tuya_ble import TuyaBLEDataPointType, TuyaBLEDevice
 
 
@@ -36,7 +43,7 @@ OKKY_UNLOCK_PAYLOAD = b"\x01\x01"
 
 
 async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
-    """Send the existing DP6 command, shared by the button and lock entity."""
+    """Send only the DP6 sequence selected for this lock product."""
     command_lock = getattr(device, "_cfm_unlock_command_lock", None)
     if command_lock is None:
         command_lock = device._cfm_unlock_command_lock = asyncio.Lock()
@@ -49,20 +56,23 @@ async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
             await datapoint.set_value(True)
             await asyncio.sleep(UNLOCK_PULSE_SECONDS)
             await datapoint.set_value(False)
-        else:
-            # okkyfgfs declares DP6 as raw. 0x01 requests unlock and the
-            # reported member ID in the owner's DP6 sample is 0x01.
+        elif device.product_id in (PRODUCT_OKKYFGFS, PRODUCT_7A4XVBTT):
+            # Tuya specifies 0x01 + member ID for a raw DP6 unlock. ID 1 is
+            # verified on okkyfgfs; try one write only on 7a4xvbtt until tested.
             datapoint = device.datapoints.get_or_create(
                 6, TuyaBLEDataPointType.DT_RAW, b"\x00\x01"
             )
             if datapoint.type != TuyaBLEDataPointType.DT_RAW:
-                raise HomeAssistantError("Expected a raw DP6 on okkyfgfs")
+                raise HomeAssistantError("Expected a raw DP6 on this lock")
             await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
-            await asyncio.sleep(UNLOCK_PULSE_SECONDS)
-            await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
+            if device.product_id == PRODUCT_OKKYFGFS:
+                await asyncio.sleep(UNLOCK_PULSE_SECONDS)
+                await datapoint.set_value(OKKY_UNLOCK_PAYLOAD)
+        else:
+            raise HomeAssistantError("Unsupported DP6 unlock product")
 
 mapping = {
-    "ms": {"okkyfgfs": LOCK_BUTTONS},
+    "ms": {"okkyfgfs": LOCK_BUTTONS, PRODUCT_7A4XVBTT: LOCK_BUTTONS},
     "jtmspro": {"b3aouluh": LOCK_BUTTONS},
 }
 
@@ -93,7 +103,7 @@ class TuyaBLEButton(TuyaBLEEntity, ButtonEntity):
         return True
 
     async def async_press(self) -> None:
-        """Send the physically tested DP6 pulse on b3 locks."""
+        """Send this product\'s DP6 unlock command."""
         await async_press_bluetooth_unlock(self._device)
 
 
