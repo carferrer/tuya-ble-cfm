@@ -196,6 +196,8 @@ def test_7a4xvbtt_inverts_report_restore_and_command(code):
     asyncio.run(switch.async_turn_off())
     assert switch._attr_is_on is False
     assert device.datapoints[33].sent == [False, True]
+    assert device.reconnect_calls == 0
+    assert code.settle_delays == []
 
 
 def test_7a4xvbtt_waits_after_reconnect_before_passage_write(code):
