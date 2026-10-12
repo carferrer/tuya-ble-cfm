@@ -39,6 +39,7 @@ LOCK_BUTTONS = [
     )
 ]
 UNLOCK_PULSE_SECONDS = 0.5
+UNLOCK_CONNECT_SETTLE_SECONDS = 0.5
 RAW_UNLOCK_MEMBER_1_PAYLOAD = b"\x01\x01"
 
 
@@ -58,12 +59,17 @@ async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
             await datapoint.set_value(False)
         elif device.product_id in (PRODUCT_OKKYFGFS, PRODUCT_7A4XVBTT):
             # Tuya specifies 0x01 + member ID for a raw DP6 unlock. ID 1 is
-            # verified on okkyfgfs; try one write only on 7a4xvbtt until tested.
+            # verified on both products; 7a4xvbtt needs a settled BLE session.
             datapoint = device.datapoints.get_or_create(
                 6, TuyaBLEDataPointType.DT_RAW, b"\x00\x01"
             )
             if datapoint.type != TuyaBLEDataPointType.DT_RAW:
                 raise HomeAssistantError("Expected a raw DP6 on this lock")
+            if device.product_id == PRODUCT_7A4XVBTT and not device.connected:
+                await device.reconnect()
+                if not device.connected:
+                    raise HomeAssistantError("Lock did not establish a paired BLE connection")
+                await asyncio.sleep(UNLOCK_CONNECT_SETTLE_SECONDS)
             await datapoint.set_value(RAW_UNLOCK_MEMBER_1_PAYLOAD)
             if device.product_id == PRODUCT_OKKYFGFS:
                 await asyncio.sleep(UNLOCK_PULSE_SECONDS)
