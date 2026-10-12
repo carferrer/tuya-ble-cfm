@@ -19,6 +19,7 @@ from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 _LOGGER = logging.getLogger(__name__)
 DP_PASSAGE_MODE_CANDIDATE = 33
 CONFIRM_TIMEOUT_SECONDS = 15
+PASSAGE_CONNECT_SETTLE_SECONDS = 0.5
 
 
 class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
@@ -104,12 +105,24 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
         )
 
         async with self._command_lock:
+            was_disconnected = (
+                self._device.product_id == PRODUCT_7A4XVBTT
+                and not self._device.connected
+            )
             dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
             if dp is None:
                 await self._device.reconnect_and_update()
                 dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
             if dp is None or dp.type != TuyaBLEDataPointType.DT_BOOL:
                 raise HomeAssistantError("Lock has not reported a Boolean DP33")
+            if was_disconnected:
+                if not self._device.connected:
+                    await self._device.reconnect()
+                if not self._device.connected:
+                    raise HomeAssistantError(
+                        "Lock did not establish a paired BLE connection"
+                    )
+                await asyncio.sleep(PASSAGE_CONNECT_SETTLE_SECONDS)
             confirmation = asyncio.get_running_loop().create_future()
             self._confirmation = confirmation
             self._desired_state = dp33_desired
