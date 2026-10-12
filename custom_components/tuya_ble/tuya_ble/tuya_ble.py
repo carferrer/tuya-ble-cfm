@@ -236,8 +236,6 @@ class TuyaBLEDataPoints:
             await self._owner._send_datapoints([dp_id])
 
 
-global_connect_lock = asyncio.Lock()
-
 @dataclass
 class TuyaBLEDeviceFunction:
     code: str
@@ -701,7 +699,6 @@ class TuyaBLEDevice:
 
     async def _ensure_connected(self) -> None:
         """Ensure connection to device is established."""
-        global global_connect_lock
         if self._expected_disconnect:
             return
         if self._connect_lock.locked():
@@ -729,18 +726,20 @@ class TuyaBLEDevice:
                     )
                     raise BleakNotFoundError()
                 try:
-                    async with global_connect_lock:
-                        _LOGGER.debug(
-                            "%s: Connecting; RSSI: %s", self.address, self.rssi
-                        )
-                        client = await establish_connection(
-                            BleakClientWithServiceCache,
-                            self._ble_device,
-                            self.address,
-                            self._disconnected,
-                            use_services_cache=True,
-                            ble_device_callback=lambda: self._ble_device,
-                        )
+                    # Each device has its own _connect_lock. Home Assistant
+                    # manages connection slots for the selected BLE proxy, so
+                    # a slow connection on one proxy must not hold up others.
+                    _LOGGER.debug(
+                        "%s: Connecting; RSSI: %s", self.address, self.rssi
+                    )
+                    client = await establish_connection(
+                        BleakClientWithServiceCache,
+                        self._ble_device,
+                        self.address,
+                        self._disconnected,
+                        use_services_cache=True,
+                        ble_device_callback=lambda: self._ble_device,
+                    )
                 except BleakNotFoundError:
                     _LOGGER.debug(
                         "%s: device not found, not in range, or poor RSSI: %s",

@@ -23,8 +23,11 @@ Se han probado físicamente la recuperación de varias aperturas, los accesos po
 | --- | --- | --- | --- |
 | `b3aouluh` | Smart Lock / `jtmspro` | Sí | Sí |
 | `okkyfgfs` | P196_V / `ms` | Sí | Aperturas acumuladas recuperadas en las pruebas; alarmas de entrega irregular, también en Tuya; DP69 no confirmado |
+| `7a4xvbtt` | JH_V1 / `ms` | Lectura y apertura DP6 probadas; entidad `lock` basada en DP47; interruptor de paso libre validado (DP33 invertido) | DP12 y DP21 recibidos; aperturas pendientes recuperadas; recuperación de alarmas sin confirmar; DP69 no observado |
 
-La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. La compatibilidad de otros productos Tuya no está garantizada.
+La instalación de referencia utiliza cuatro `b3aouluh` y una `okkyfgfs`. Se ha probado una `7a4xvbtt` con Home Assistant en modo keep-alive: hubo conexión BLE emparejada, dos reconexiones completadas y recepción de informes en directo. La compatibilidad de otros productos Tuya no está garantizada.
+
+En `7a4xvbtt` se leen batería porcentual (DP8), última alarma (DP21), estado del motor (DP47), accesos (DP12/13/14/15/19/55/62) y alarmas recibidas. También se ofrecen la conexión BLE, RSSI, última conexión, intervalo y el botón de actualización manual. El botón DP6 envía una sola vez `01 01` (abrir, miembro 1), sin pausa ni segundo envío; se ha confirmado que desbloquea físicamente esta unidad. Es el formato descrito por [Tuya para DP6](https://developer.tuya.com/en/docs/iot/ble?id=K9ow3vcpn71ua). La entidad `lock` muestra el último DP47 y usa ese mismo comando de apertura para **Bloquear** y **Desbloquear**, como en las otras cerraduras. La app de Tuya llama a este ajuste «Interruptor de desbloqueo automático»: activado vuelve a bloquear después de abrir y desactivado deja la cerradura abierta. Por ello el interruptor «Modo paso libre» invierte DP33: encenderlo envía `false` (desactivar cierre automático) y apagarlo envía `true`. El propietario ha confirmado que el interruptor funciona físicamente desde HA en esta unidad. La integración mantiene además el sensor «Cierre automático» de solo lectura, que muestra el valor directo de DP33; ambos restauran el último informe recibido. Los DP36 (`auto_lock_time`) y DP46 (`manual_lock`) tampoco se escriben. En la prueba de la `7a4xvbtt`, DP8 informó 100 %, DP47 pasó a `true` durante la apertura y volvió a `false`, DP12 informó valor 100 para una apertura por huella y DP21 informó enum 0 tras una huella incorrecta, coherente con `wrong_finger`. DP33 informó `true` antes de la prueba del interruptor; el funcionamiento del modo paso libre desde HA se confirmó después. Las entidades `event.*` mostraron tanto `fingerprint_unlock` como `wrong_finger` en HA. Se ha comprobado que recupera varias aperturas pendientes. Para generar `wrong_finger` o `wrong_password` esta unidad requiere varios intentos fallidos de huella o código, respectivamente; un solo fallo no genera una alarma. Queda por confirmar si entrega alarmas generadas mientras HA está desconectado y la correspondencia física de los demás valores. No se observó ninguna solicitud DP69.
 
 ## Instalación y actualización
 
@@ -52,33 +55,34 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 
 | Entidad | DP / función |
 | --- | --- |
-| Botón `bluetooth_unlock` | DP6, desbloqueo Bluetooth |
-| Entidad `lock` (`motor_lock`) | Ambas familias: estado reportado por DP47 y comando DP6 para ambas acciones |
-| Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, ambas familias |
+| Botón `bluetooth_unlock` | DP6 validado en los tres productos; `7a4xvbtt` usa una sola escritura `01 01` |
+| Entidad `lock` (`motor_lock`) | Los tres productos: estado reportado por DP47 y comando DP6 de apertura para ambas acciones |
+| Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, los tres productos |
 | Selector `beep_volume` | DP31, volumen |
 | Sensor binario `lock_motor_state` | DP47, estado del motor |
-| Sensor binario `ble_connection` | Sesión Bluetooth emparejada activa con HA, ambas familias |
+| Sensor binario `automatic_lock` | DP33 directo, «Cierre automático» en `7a4xvbtt`; solo lectura |
+| Sensor binario `ble_connection` | Sesión Bluetooth emparejada activa con HA, los tres productos |
 | Sensor `Alarm` | DP21, último valor de alarma recibido |
-| Batería | DP8 en `okkyfgfs`; DP9 `battery_state` en `b3aouluh` |
+| Batería | DP8 en `okkyfgfs` y `7a4xvbtt`; DP9 `battery_state` en `b3aouluh` |
 | RSSI | Diagnóstico de señal |
-| Evento `Access` | Aperturas DP12/13/14/15/19/55/62/63, ambas familias si la cerradura los reporta |
-| Sensor `Last access` | Hora de la apertura más reciente, ambas familias |
-| Evento `Alarm events` | Registros individuales DP21, ambas familias |
-| Interruptor `Modo paso libre` | DP33, solo `b3aouluh`; entidad habilitada por defecto |
-| Sensor `Last connected` | Última conexión BLE emparejada, ambas familias |
-| Sensor `Update interval` | Intervalo periódico en minutos; 0 en los otros modos, ambas familias |
+| Evento `Access` | Aperturas DP12/13/14/15/19/55/62/63, cuando la cerradura los reporta |
+| Sensor `Last access` | Hora de la apertura más reciente, los tres productos |
+| Evento `Alarm events` | Registros individuales DP21, cuando la cerradura los reporta |
+| Interruptor `Modo paso libre` | DP33 directo en `b3aouluh` e invertido en `7a4xvbtt`; entidad habilitada por defecto |
+| Sensor `Last connected` | Última conexión BLE emparejada, los tres productos |
+| Sensor `Update interval` | Intervalo periódico en minutos; 0 en los otros modos, los tres productos |
 
 El sensor `Alarm` muestra un estado. `Alarm events` permite reaccionar a cada registro nuevo, incluidos varios fallos consecutivos del mismo tipo con horas distintas. Las alarmas no se convierten en aperturas ni modifican `Last access`.
 
-El sensor `alarm_lock`, tanto en `b3aouluh` como en `okkyfgfs`, guarda por cerradura su último valor DP21 válido y lo recupera tras reiniciar HA. Al actualizar desde una versión anterior, también puede tomar el último registro de alarma que la integración ya había archivado localmente. Una nueva lectura DP21 tiene prioridad sobre el valor guardado. La recuperación no abre una conexión BLE ni vuelve a emitir eventos; hasta recibir una lectura nueva, el estado mostrado es el último conocido. Si una cerradura nunca ha comunicado una alarma y no hay registro previo, el sensor seguirá sin valor hasta el primer DP21.
+El sensor `alarm_lock`, en los tres productos, guarda por cerradura su último valor DP21 válido y lo recupera tras reiniciar HA. Al actualizar desde una versión anterior, también puede tomar el último registro de alarma que la integración ya había archivado localmente. Una nueva lectura DP21 tiene prioridad sobre el valor guardado. La recuperación no abre una conexión BLE ni vuelve a emitir eventos; hasta recibir una lectura nueva, el estado mostrado es el último conocido. Si una cerradura nunca ha comunicado una alarma y no hay registro previo, el sensor seguirá sin valor hasta el primer DP21.
 
-En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 500 ms tras completar esa escritura y envía DP6 `false`. Esto reproduce la doble pulsación que funcionó en la instalación, sin necesitar una automatización. En `okkyfgfs`, DP6 es `raw`: envía dos veces `01 01` (orden de apertura e ID de miembro 1 del ejemplo facilitado), con 500 ms entre escrituras. El botón se ha validado físicamente en ambas familias. Puede iniciar la conexión BLE aunque la cerradura esté desconectada; si falla la primera escritura, no envía la segunda.
+En `b3aouluh`, una pulsación de `bluetooth_unlock` envía DP6 `true`, espera 500 ms tras completar esa escritura y envía DP6 `false`. Esto reproduce la doble pulsación que funcionó en la instalación, sin necesitar una automatización. En `okkyfgfs`, DP6 es `raw`: envía dos veces `01 01` (orden de apertura e ID de miembro 1 del ejemplo facilitado), con 500 ms entre escrituras. En `7a4xvbtt`, una sola escritura `01 01` se ha validado físicamente. Si la cerradura está desconectada, la integración establece primero una sesión BLE emparejada, espera 500 ms y luego envía DP6 una vez; si ya está conectada, envía DP6 directamente. Esta espera tras la conexión está pendiente de prueba física. No hay reintento automático ni segunda escritura si falla. El botón de apertura y ambas acciones de la entidad `lock` usan esta misma secuencia.
 
-La entidad `lock` de ambas familias muestra `locked` cuando el último DP47 Booleano recibido es `false` y `unlocked` cuando es `true`. Sin lectura previa, muestra `unknown`. Las acciones **Bloquear** y **Desbloquear** envían exactamente la misma secuencia DP6 que el botón de apertura de cada modelo, sin cambiar el estado de forma optimista: solo un nuevo DP47 puede actualizarlo. Por tanto, **Bloquear** también envía una orden de apertura y no garantiza el cierre del modo de paso libre. En `b3aouluh`, el paso libre se controla con su interruptor específico; en `okkyfgfs` no se ha identificado un comando para ese modo. Como la cerradura se desconecta para ahorrar batería, el estado visible es la última lectura conocida y puede quedar desactualizado hasta recibir un nuevo DP47. En las pruebas de `okkyfgfs`, DP47 se recibe al cambiar el motor mientras está conectada, pero no se vuelve a enviar con cada actualización manual.
+La entidad `lock` de los tres productos muestra `locked` cuando el último DP47 Booleano recibido es `false` y `unlocked` cuando es `true`. Sin lectura previa, muestra `unknown`. Las acciones **Bloquear** y **Desbloquear** envían exactamente la misma secuencia DP6 que el botón de apertura de cada modelo, sin cambiar el estado de forma optimista: solo un nuevo DP47 puede actualizarlo. Por tanto, **Bloquear** también envía una orden de apertura y no garantiza el cierre del modo de paso libre. En `b3aouluh`, el paso libre se controla con DP33 directo; en `7a4xvbtt` se usa DP33 invertido, probado en esta unidad y en `okkyfgfs` no se ha identificado un comando para ese modo. Como la cerradura se desconecta para ahorrar batería, el estado visible es la última lectura conocida y puede quedar desactualizado hasta recibir un nuevo DP47. En las pruebas de `okkyfgfs`, DP47 se recibe al cambiar el motor mientras está conectada, pero no se vuelve a enviar con cada actualización manual.
 
-Al reiniciar HA, `lock`, `lock_motor_state` y `Modo paso libre` recuperan el último DP47 o DP33 Booleano recibido de la cerradura. Una lectura nueva sustituye el valor guardado; los valores provisionales de la caché BLE y las escrituras enviadas desde HA no lo sustituyen. Sin un valor guardado puede verse `unknown` hasta recibir el primer informe correspondiente. El estado del motor y la entidad `lock` están disponibles en ambas familias; `Modo paso libre` es exclusivo de `b3aouluh`.
+Al reiniciar HA, `lock`, `lock_motor_state` y `Modo paso libre` recuperan el último DP47 o DP33 Booleano recibido de la cerradura. Una lectura nueva sustituye el valor guardado; los valores provisionales de la caché BLE y las escrituras enviadas desde HA no lo sustituyen. Sin un valor guardado puede verse `unknown` hasta recibir el primer informe correspondiente. El estado del motor y la entidad `lock` están disponibles en los tres productos; `Modo paso libre` está disponible en `b3aouluh` y `7a4xvbtt`.
 
-El interruptor Modo paso libre refleja el DP33 confirmado por la cerradura. Habilitar la entidad no activa físicamente el modo. Las entidades deshabilitadas por defecto en la versión experimental se habilitan al cargar la integración; una deshabilitación manual del usuario se respeta. Se conserva el mismo `unique_id` y `entity_id`. El evento `Access` emite `passage_mode_enabled` (`event_type_id: 33`) solo cuando DP33 pasa de desactivado a activado. No se emite al cerrarlo, con informes repetidos ni al arrancar HA con el modo ya activado. La hora del evento es la de recepción en HA; no es un registro histórico de apertura.
+El interruptor Modo paso libre refleja el DP33 confirmado por la cerradura, invertido en `7a4xvbtt`. En ese producto, si está desconectado, establece una sesión BLE emparejada, espera 500 ms y después escribe DP33; si ya está conectado, escribe sin esa espera. El nuevo intervalo tras la conexión está pendiente de prueba física. Habilitar la entidad no activa físicamente el modo. Las entidades deshabilitadas por defecto en la versión experimental se habilitan al cargar la integración; una deshabilitación manual del usuario se respeta. Se conserva el mismo `unique_id` y `entity_id`. En `b3aouluh`, el evento `Access` emite `passage_mode_enabled` (`event_type_id: 33`) solo cuando DP33 pasa de desactivado a activado. No se emite al cerrarlo, con informes repetidos ni al arrancar HA con el modo ya activado. Por ahora, `7a4xvbtt` no genera este evento. La hora del evento es la de recepción en HA; no es un registro histórico de apertura.
 
 `Last connected` conserva durante la desconexión la hora de la última conexión BLE emparejada vista por este proceso de HA. Tras un reinicio empieza sin valor hasta la siguiente conexión. `Update interval` muestra los minutos configurados en modo periódico; muestra 0 en los modos bajo demanda, detección de actividad y keep-alive. Ninguno de estos sensores abre conexiones BLE adicionales. El botón `Actualizar cerradura` fuerza una conexión y una lectura de estado únicamente cuando se pulsa; la conexión vuelve a seguir el modo de ahorro configurado.
 
@@ -97,7 +101,11 @@ La política se configura por cerradura en las opciones de la integración.
 
 Intervalos disponibles: **1, 2, 5, 10, 15, 30 y 60 minutos; 5, 12 y 24 horas**. El valor predeterminado del intervalo es 5 minutos y se utiliza en modo periódico.
 
+En `7a4xvbtt` aún no se ha caracterizado el patrón de anuncios BLE. Aunque se elija «Detectar actividad», la integración no inicia conexiones a partir de sus anuncios: para probar la recuperación de eventos usa **Sincronización periódica** o el botón **Actualizar cerradura**. Así se evita aplicar a este modelo los umbrales medidos para otras cerraduras.
+
 El ahorro utiliza desconexión por inactividad, con un plazo base de 30 segundos y ajustes según la operación y el modo. Las entidades de eventos aprovechan las conexiones existentes; no añaden sondeos propios.
+
+Las conexiones de cerraduras distintas se inician de forma independiente. Cada una conserva su bloqueo de conexión para evitar intentos duplicados sobre la misma cerradura, mientras Home Assistant gestiona las conexiones disponibles de los proxies Bluetooth. Si una cerradura o su proxy tarda en conectar, las demás ya no esperan a que terminen sus reintentos.
 
 En modo periódico, los avisos se reciben al sincronizar, no necesariamente en el momento del suceso. Un intervalo mayor reduce la frecuencia de conexiones y aumenta la espera de los avisos. No se ha medido todavía la autonomía final de las baterías.
 
@@ -289,23 +297,23 @@ También quedan pendientes:
 - Medir la autonomía real con los distintos intervalos de conexión.
 - Implementar, si se necesita, el envío externo a MSSQL.
 
-## Prueba experimental: botón interior de paso libre
+## Prueba del modo paso libre
 
 Los diagnósticos de una cerradura `b3aouluh` mostraron DP33 (`DT_BOOL`) y DP47 en `false` en estado normal, `true` con el botón interior en modo abierto y de nuevo `false` tras desactivarlo. La prueba física posterior confirmó que encender y apagar DP33 desde HA cambia el modo de paso libre en esa cerradura. Las otras cerraduras `b3aouluh` aún requieren validación física.
 
-La rama experimental añade el interruptor **Modo paso libre** solo para `b3aouluh`, habilitado por defecto como entidad. No cambia DP6, DP47, DP69 ni la política de conexiones. Para comprobarlo en otra cerradura:
+El interruptor **Modo paso libre** está habilitado por defecto como entidad en `b3aouluh` y `7a4xvbtt`. No cambia DP6, DP47, DP69 ni la política de conexiones. En `7a4xvbtt`, el interruptor de la app desactivado deja la cerradura abierta, por lo que la integración invierte el valor DP33. El propietario ha confirmado que el interruptor funciona desde HA en su unidad. Para repetir la prueba en otra unidad:
 
 1. Instala la rama experimental y reinicia Home Assistant.
-2. En **Ajustes → Dispositivos y servicios → Entidades**, busca el interruptor en la cerradura elegida. Debe mostrar el estado reportado de DP33: apagado en normal, encendido al activar el botón interior. Si el estado no coincide, detén la prueba. Una entidad deshabilitada manualmente por el usuario seguirá deshabilitada hasta volver a habilitarla.
-3. Con la cerradura a la vista y pudiendo volver a normal físicamente, enciende el interruptor en HA. Comprueba físicamente si queda en paso libre y si HA recibe DP33 `true`.
-4. Apágalo desde HA. Comprueba que vuelve a normal y que HA recibe DP33 `false`. Si no hay confirmación en 15 segundos, la acción mostrará un error; el efecto físico puede haber ocurrido igualmente, así que inspecciona la cerradura antes de repetirla.
+2. En **Ajustes → Dispositivos y servicios → Entidades**, busca «Modo paso libre» y «Cierre automático». Para `7a4xvbtt`, el interruptor debe mostrar el estado opuesto al sensor. Si no coincide, detén la prueba. Una entidad deshabilitada manualmente por el usuario seguirá deshabilitada hasta volver a habilitarla.
+3. Con la cerradura a la vista, enciende «Modo paso libre» en HA. En `7a4xvbtt` debe recibirse DP33 `false`, apagarse «Cierre automático» y permanecer abierta tras una apertura. En `b3aouluh` debe recibirse DP33 `true`.
+4. Apágalo desde HA. En `7a4xvbtt` debe recibirse DP33 `true` y volver a bloquear después de abrir; en `b3aouluh` debe recibirse DP33 `false`. Si no hay confirmación en 15 segundos, la acción mostrará un error; el efecto físico puede haber ocurrido igualmente, así que inspecciona la cerradura antes de repetirla.
 5. Guarda diagnósticos y los mensajes del registro para comparar DP33 y DP47.
 
 El interruptor solo acepta un DP33 Booleano previamente reportado. La escritura espera una notificación posterior de la cerradura con el valor solicitado. El transporte modifica su caché local al enviar un DP, por lo que ese valor local **no** se considera confirmación. La entidad muestra la última lectura recibida y puede estar desactualizada mientras la cerradura esté desconectada. No se programa ningún cambio automático ni se fuerza una reversión al agotar el tiempo de espera.
 
 ## Validación
 
-La suite actual contiene **126 pruebas**. Cubre el parser BLE, el alcance de los productos, las políticas de conexión, los IDs de entidades, las acciones y estados de `lock` en ambas familias, la restauración de alarmas por cerradura y el comportamiento de los eventos: tipos, fechas, duplicados, carga inicial y recargas. También se comprueba con Ruff, Hassfest y HACS.
+La suite cubre el parser BLE, el alcance de los productos, las políticas de conexión, los IDs de entidades, las acciones y estados de `lock` en los tres productos, la restauración de alarmas por cerradura y el comportamiento de los eventos: tipos, fechas, duplicados, carga inicial y recargas. También se comprueba con Ruff, Hassfest y HACS.
 
 Las pruebas de entidades utilizan dobles ligeros de los límites de Home Assistant. Se complementan con las pruebas físicas descritas arriba; no equivalen a haber probado todos los tipos de evento en todas las cerraduras.
 

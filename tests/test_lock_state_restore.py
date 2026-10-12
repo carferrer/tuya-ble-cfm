@@ -7,6 +7,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 
 SOURCE = Path(__file__).resolve().parents[1] / "custom_components/tuya_ble/lock_state.py"
 
@@ -76,7 +78,8 @@ def test_restore_and_save_only_confirmed_boolean_reports():
     assert callbacks == []
 
 
-def test_motor_binary_sensor_uses_saved_report_not_transport_cache():
+@pytest.mark.parametrize("dp_id", [33, 47])
+def test_lock_binary_sensor_uses_saved_report_not_transport_cache(dp_id):
     sensor_source = SOURCE.with_name("binary_sensor.py")
     tree = ast.parse(sensor_source.read_text(encoding="utf-8"))
     cls = next(
@@ -109,10 +112,10 @@ def test_motor_binary_sensor_uses_saved_report_not_transport_cache():
         namespace,
     )
     device = SimpleNamespace(
-        datapoints={47: SimpleNamespace(value=True)},
+        datapoints={dp_id: SimpleNamespace(value=True)},
         _cfm_lock_state=SimpleNamespace(get=lambda dp_id: False),
     )
-    mapping = SimpleNamespace(dp_id=47, description=SimpleNamespace())
+    mapping = SimpleNamespace(dp_id=dp_id, description=SimpleNamespace())
     entity = namespace["TuyaBLEBinarySensor"](None, None, device, None, mapping)
     asyncio.run(entity.async_added_to_hass())
     assert entity.available is True

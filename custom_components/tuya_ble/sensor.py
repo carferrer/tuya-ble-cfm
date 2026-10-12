@@ -32,6 +32,7 @@ from .alarm import ALARM_OPTIONS, ALARM_STORE_VERSION, alarm_store_key
 from .connection_policy import CONNECTION_MODE_PERIODIC_SYNC, connection_mode, sync_interval_minutes
 from .const import DOMAIN
 from .devices import (
+    PRODUCT_7A4XVBTT,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
@@ -88,6 +89,10 @@ def alarm_mapping() -> TuyaBLESensorMapping:
 mapping = {
     "ms": {
         "okkyfgfs": [
+            alarm_mapping(),
+            TuyaBLEBatteryMapping(dp_id=8),
+        ],
+        PRODUCT_7A4XVBTT: [
             alarm_mapping(),
             TuyaBLEBatteryMapping(dp_id=8),
         ]
@@ -409,6 +414,6 @@ async def async_setup_entry(
                         hass, data.coordinator, data.device, data.product, item
                     )
                 )
-    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS):
+    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS, PRODUCT_7A4XVBTT):
         entities.append(TuyaBLELastAccessSensor(hass, entry, data.device))
     async_add_entities(entities)
