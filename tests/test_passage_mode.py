@@ -72,6 +72,12 @@ class FakeDevice:
         self.datapoints = FakeDatapoints()
         self.datapoints[33] = FakeDP(self, initial)
         self.callbacks = []
+        self.connected = True
+        self.reconnect_calls = 0
+
+    async def reconnect(self):
+        self.reconnect_calls += 1
+        self.connected = True
 
     def register_callback(self, callback):
         self.callbacks.append(callback)
@@ -91,14 +97,29 @@ def code():
         node for node in tree.body
         if not isinstance(node, (ast.Import, ast.ImportFrom))
     ]
+    delays = []
+
+    async def sleep(seconds):
+        delays.append(seconds)
+
     ns = {
-        "__name__": "passage_test", "asyncio": asyncio, "logging": logging,
+        "__name__": "passage_test",
+        "asyncio": SimpleNamespace(
+            Lock=asyncio.Lock,
+            get_running_loop=asyncio.get_running_loop,
+            wait_for=asyncio.wait_for,
+            sleep=sleep,
+        ),
+        "settle_delays": delays,
+        "logging": logging,
         "TuyaBLEEntity": FakeBase, "SwitchEntity": object,
         "SwitchEntityDescription": lambda **kw: SimpleNamespace(**kw),
         "TuyaBLEDataPointType": DPType, "HomeAssistantError": HAError,
         "callback": lambda fn: fn, "DOMAIN": "tuya_ble",
         "PRODUCT_B3AOULUH": "b3aouluh",
-        "PRODUCT_7A4XVBTT": "7a4xvbtt", "_LOGGER": SimpleNamespace(warning=lambda *a: None),
+        "PRODUCT_7A4XVBTT": "7a4xvbtt",
+        "PASSAGE_CONNECT_SETTLE_SECONDS": 0.5,
+        "_LOGGER": SimpleNamespace(warning=lambda *a: None),
         "er": SimpleNamespace(
             async_get=lambda hass: SimpleNamespace(async_get_entity_id=lambda *args: None),
             RegistryEntryDisabler=SimpleNamespace(INTEGRATION="integration"),
@@ -175,6 +196,38 @@ def test_7a4xvbtt_inverts_report_restore_and_command(code):
     asyncio.run(switch.async_turn_off())
     assert switch._attr_is_on is False
     assert device.datapoints[33].sent == [False, True]
+
+
+def test_7a4xvbtt_waits_after_reconnect_before_passage_write(code):
+    device = FakeDevice(product="7a4xvbtt", initial=True)
+    switch = make_switch(code, device)
+    device.connected = False
+
+    async def report(value):
+        assert device.connected is True
+        assert device.reconnect_calls == 1
+        assert code.settle_delays == [0.5]
+        device.report(value)
+
+    device.datapoints[33].on_send = report
+    asyncio.run(switch.async_turn_on())
+    assert device.datapoints[33].sent == [False]
+    assert switch._attr_is_on is True
+
+
+def test_7a4xvbtt_refuses_passage_write_without_pairing(code):
+    device = FakeDevice(product="7a4xvbtt", initial=True)
+    switch = make_switch(code, device)
+    device.connected = False
+
+    async def fail_reconnect():
+        device.reconnect_calls += 1
+
+    device.reconnect = fail_reconnect
+    with pytest.raises(HAError, match="paired BLE connection"):
+        asyncio.run(switch.async_turn_on())
+    assert device.datapoints[33].sent == []
+    assert code.settle_delays == []
 
 
 def test_7a4xvbtt_unknown_saved_state_is_not_inverted_to_on(code):
