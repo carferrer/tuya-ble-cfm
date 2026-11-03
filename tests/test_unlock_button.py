@@ -92,13 +92,6 @@ def test_new_lock_sends_one_raw_unlock_command_when_connected():
     assert delays == []
 
 
-def test_la_t01_dp6_button_sends_one_raw_command_when_connected():
-    button, dp, delays = _button(product="8gza4o8a")
-    asyncio.run(button.async_press())
-    assert dp.sent == [b"\x01\x01"]
-    assert delays == []
-
-
 def test_la_t01_dp71_button_fetches_cloud_report_and_sends_once():
     source = ast.parse(BUTTON.read_text(encoding="utf-8"))
     cls = next(

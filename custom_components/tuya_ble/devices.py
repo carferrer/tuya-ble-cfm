@@ -102,7 +102,6 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         self._device._cfm_dp69_last_response = None
         self._device._cfm_dp69_last_error = None
         self._device._cfm_dp71_last_result = None
-        self._device._cfm_dp6_last_result = None
         device.register_connected_callback(self._async_handle_connect)
         device.register_callback(self._async_handle_update)
         device.register_disconnected_callback(self._async_handle_disconnect)
@@ -175,11 +174,6 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
                         "action": value[12],
                         "method": value[17],
                         "result_code": value[18],
-                    }
-                elif datapoint.id == 6 and len(value) == 2:
-                    self._device._cfm_dp6_last_result = {
-                        "received_at": time.time(),
-                        "result_code": value[0],
                     }
         received_event = {
             "received_at": time.time(),

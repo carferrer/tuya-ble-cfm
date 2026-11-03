@@ -10,6 +10,7 @@ from homeassistant.components.button import ButtonEntity, ButtonEntityDescriptio
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
@@ -63,19 +64,14 @@ async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
         elif device.product_id in (
             PRODUCT_OKKYFGFS,
             PRODUCT_7A4XVBTT,
-            PRODUCT_8GZA4O8A,
         ):
-            # DP6 uses 0x01 + member ID. ID 1 is proven on okkyfgfs and
-            # 7a4xvbtt, and is an experimental value on the LA-T01.
+            # DP6 uses 0x01 + member ID. ID 1 is proven on both products.
             datapoint = device.datapoints.get_or_create(
                 6, TuyaBLEDataPointType.DT_RAW, b"\x00\x01"
             )
             if datapoint.type != TuyaBLEDataPointType.DT_RAW:
                 raise HomeAssistantError("Expected a raw DP6 on this lock")
-            if (
-                device.product_id in (PRODUCT_7A4XVBTT, PRODUCT_8GZA4O8A)
-                and not device.connected
-            ):
+            if device.product_id == PRODUCT_7A4XVBTT and not device.connected:
                 await device.reconnect()
                 if not device.connected:
                     raise HomeAssistantError("Lock did not establish a paired BLE connection")
@@ -89,17 +85,7 @@ async def async_press_bluetooth_unlock(device: TuyaBLEDevice) -> None:
 
 mapping = {
     "ms": {"okkyfgfs": LOCK_BUTTONS, PRODUCT_7A4XVBTT: LOCK_BUTTONS},
-    "jtmspro": {
-        "b3aouluh": LOCK_BUTTONS,
-        PRODUCT_8GZA4O8A: [
-            TuyaBLEButtonMapping(
-                dp_id=6,
-                description=ButtonEntityDescription(
-                    key="bluetooth_unlock_dp6_test", name="Prueba abrir DP6"
-                ),
-            )
-        ],
-    },
+    "jtmspro": {"b3aouluh": LOCK_BUTTONS},
 }
 
 
@@ -230,5 +216,11 @@ async def async_setup_entry(
     ]
     entities.append(TuyaBLERefreshButton(hass, data))
     if data.device.product_id == PRODUCT_8GZA4O8A:
+        registry = er.async_get(hass)
+        obsolete_dp6 = registry.async_get_entity_id(
+            "button", DOMAIN, f"{data.device.device_id}-bluetooth_unlock_dp6_test"
+        )
+        if obsolete_dp6 is not None:
+            registry.async_remove(obsolete_dp6)
         entities.append(TuyaBLEDP71TestButton(hass, data))
     async_add_entities(entities)
