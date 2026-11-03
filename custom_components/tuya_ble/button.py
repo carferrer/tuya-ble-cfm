@@ -243,7 +243,7 @@ class TuyaBLEDP71LocalTestButton(TuyaBLEEntity, ButtonEntity):
             cached = getattr(self._device, "_cfm_dp71_local_command", None)
             if cached is None:
                 raise HomeAssistantError(
-                    "Primero prepara DP71 con el botón original y acceso a Internet"
+                    "Primero pulsa «Preparar y abrir (Tuya Cloud)» con Internet"
                 )
             try:
                 command = refresh_dp71_unlock(cached, int(time.time()))
