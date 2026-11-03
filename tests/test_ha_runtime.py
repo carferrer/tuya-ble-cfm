@@ -95,7 +95,10 @@ def test_la_t01_exposes_refresh_and_dp71_without_dp6():
         Platform.SWITCH,
     ]
     assert button.get_mapping_by_device(device) == []
-    assert {item.dp_id for item in select.get_mapping_by_device(device)} == {31}
+    volume_mapping = select.get_mapping_by_device(device)
+    assert {item.dp_id for item in volume_mapping} == {31}
+    assert volume_mapping[0].description.key == "beep_volume"
+    assert volume_mapping[0].description.translation_key == "beep_volume_experimental"
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
 

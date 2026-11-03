@@ -45,9 +45,21 @@ LOCK_VOLUME = [
     )
 ]
 
+LA_T01_VOLUME = [
+    TuyaBLESelectMapping(
+        dp_id=31,
+        description=SelectEntityDescription(
+            key="beep_volume",
+            translation_key="beep_volume_experimental",
+            options=["mute", "low", "normal", "high"],
+            entity_category=EntityCategory.CONFIG,
+        ),
+    )
+]
+
 mapping = {
     "ms": {"okkyfgfs": LOCK_VOLUME},
-    "jtmspro": {"b3aouluh": LOCK_VOLUME, PRODUCT_8GZA4O8A: LOCK_VOLUME},
+    "jtmspro": {"b3aouluh": LOCK_VOLUME, PRODUCT_8GZA4O8A: LA_T01_VOLUME},
 }
 
 

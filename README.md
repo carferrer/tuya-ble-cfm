@@ -67,7 +67,7 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Botón `bluetooth_unlock` | DP6 validado en los tres productos; `7a4xvbtt` usa una sola escritura `01 01` |
 | Entidad `lock` (`motor_lock`) | Los tres productos: estado reportado por DP47 y comando DP6 de apertura para ambas acciones |
 | Botón `Actualizar cerradura` | Conexión BLE manual y solicitud de estado actual, los tres productos |
-| Selector `beep_volume` | DP31, volumen; en LA-T01 es experimental y aún no hay cambio acústico confirmado |
+| Selector `beep_volume` | DP31, volumen; en LA-T01 aparece como experimental y la escritura desde HA aún no cambia el sonido |
 | Sensor binario `lock_motor_state` | DP47, estado del motor |
 | Sensor binario `automatic_lock` | DP33 directo, «Cierre automático» en `7a4xvbtt` y LA-T01; solo lectura |
 | Sensor binario `ble_connection` | Sesión Bluetooth emparejada activa con HA, los tres productos |
