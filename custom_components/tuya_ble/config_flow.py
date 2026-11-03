@@ -28,7 +28,7 @@ from homeassistant.const import (
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowHandler, FlowResult
 
-from .tuya_ble import SERVICE_UUID, SERVICE_UUID_TEMP, TuyaBLEDeviceCredentials
+from .tuya_ble import SERVICE_UUID, TuyaBLEDeviceCredentials
 
 from .connection_policy import (
     CONF_CONNECTION_MODE,
@@ -56,14 +56,6 @@ from .devices import TuyaBLEData, get_device_readable_name
 from .cloud import HASSTuyaBLEDeviceManager
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def _has_tuya_service(discovery: BluetoothServiceInfoBleak) -> bool:
-    """Recognize both Tuya BLE advertisement service UUIDs."""
-    return bool(
-        discovery.service_data
-        and {SERVICE_UUID, SERVICE_UUID_TEMP} & discovery.service_data.keys()
-    )
 
 
 async def _try_login(
@@ -370,7 +362,8 @@ class TuyaBLEConfigFlow(ConfigFlow, domain=DOMAIN):
                 if (
                     discovery.address in current_addresses
                     or discovery.address in self._discovered_devices
-                    or not _has_tuya_service(discovery)
+                    or discovery.service_data is None
+                    or not SERVICE_UUID in discovery.service_data.keys()
                 ):
                     continue
                 self._discovered_devices[discovery.address] = discovery
