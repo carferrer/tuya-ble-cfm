@@ -64,6 +64,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
         ),
         "la_t01_unlock_tests": {
             "dp71_last_result": getattr(device, "_cfm_dp71_last_result", None),
+            "dp71_local_ready": bool(
+                getattr(device, "_cfm_dp71_local_command", None)
+            ),
             "dp71_response_history": list(
                 getattr(device, "_cfm_dp71_response_history", [])
             ),

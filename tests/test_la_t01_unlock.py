@@ -17,6 +17,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 LA_T01UnlockDataError = module.LA_T01UnlockDataError
 build_dp71_unlock = module.build_dp71_unlock
+refresh_dp71_unlock = module.refresh_dp71_unlock
 
 
 def properties(*, member=1, result=0, pairing_time=10, report_time=20):
@@ -73,3 +74,18 @@ def test_dp71_rejects_missing_or_invalid_cloud_reports(values):
 def test_dp71_rejects_failed_device_response():
     with pytest.raises(LA_T01UnlockDataError, match="apertura válida"):
         build_dp71_unlock(properties(result=4), 1800000000)
+
+
+def test_cached_dp71_reuses_only_identity_and_verification_with_fresh_time():
+    original = build_dp71_unlock(properties(), 1800000000)
+    refreshed = refresh_dp71_unlock(original, 1800000030)
+    assert refreshed[:13] == original[:13]
+    assert refreshed[13:17] == (1800000030).to_bytes(4, "big")
+    assert refreshed[17:] == original[17:]
+    assert original[13:17] == (1800000000).to_bytes(4, "big")
+
+
+@pytest.mark.parametrize("command", (b"short", bytes(19), b"\xff\xff" + bytes(17)))
+def test_cached_dp71_rejects_missing_or_malformed_seed(command):
+    with pytest.raises(LA_T01UnlockDataError, match="local válida"):
+        refresh_dp71_unlock(command, 1800000030)

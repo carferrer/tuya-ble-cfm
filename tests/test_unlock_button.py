@@ -137,6 +137,71 @@ def test_la_t01_dp71_button_fetches_cloud_report_and_sends_once():
     )
     asyncio.run(button.async_press())
     assert events == [("cloud", "device123"), ("ble", b"one-fresh-command")]
+    assert device._cfm_dp71_local_command == b"one-fresh-command"
+
+    async def failed_send(value):
+        raise RuntimeError("BLE write failed")
+
+    datapoint.set_value = failed_send
+    with pytest.raises(RuntimeError, match="BLE write failed"):
+        asyncio.run(button.async_press())
+    assert device._cfm_dp71_local_command is None
+
+
+def test_la_t01_local_button_requires_seed_then_uses_ble_without_cloud():
+    source = ast.parse(BUTTON.read_text(encoding="utf-8"))
+    cls = next(
+        node for node in source.body
+        if isinstance(node, ast.ClassDef) and node.name == "TuyaBLEDP71LocalTestButton"
+    )
+    cls.bases = [ast.Name(id="FakeBase", ctx=ast.Load())]
+    events = []
+    datapoint = FakeDatapoint(dp_type="raw")
+
+    async def reconnect():
+        events.append("reconnect")
+        device.connected = True
+
+    async def send(value):
+        events.append(("ble", value))
+
+    async def sleep(seconds):
+        events.append(("settle", seconds))
+
+    datapoint.set_value = send
+    device = SimpleNamespace(
+        product_id="8gza4o8a",
+        connected=False,
+        reconnect=reconnect,
+        datapoints=SimpleNamespace(get_or_create=lambda *args: datapoint),
+    )
+    namespace = {
+        "FakeBase": FakeBase,
+        "asyncio": SimpleNamespace(Lock=asyncio.Lock, sleep=sleep),
+        "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "TuyaBLEDataPointType": SimpleNamespace(DT_RAW="raw"),
+        "ButtonEntityDescription": lambda **kwargs: SimpleNamespace(**kwargs),
+        "HomeAssistantError": RuntimeError,
+        "UNLOCK_CONNECT_SETTLE_SECONDS": 0.5,
+        "time": SimpleNamespace(time=lambda: 1800000030),
+        "refresh_dp71_unlock": lambda command, timestamp: b"fresh-local-command",
+    }
+    module = ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[]))
+    exec(
+        compile(module, str(BUTTON), "exec", flags=__import__("__future__").annotations.compiler_flag),
+        namespace,
+    )
+    button = namespace["TuyaBLEDP71LocalTestButton"](
+        None, SimpleNamespace(coordinator=None, device=device, product=None)
+    )
+    with pytest.raises(RuntimeError, match="Primero pulsa"):
+        asyncio.run(button.async_press())
+    assert events == []
+
+    device._cfm_dp71_local_command = b"validated-cloud-command"
+    asyncio.run(button.async_press())
+    assert events == ["reconnect", ("settle", 0.5), ("ble", b"fresh-local-command")]
+    assert device._cfm_dp71_local_command == b"validated-cloud-command"
 
 
 def test_new_lock_connects_and_waits_before_one_unlock_write():

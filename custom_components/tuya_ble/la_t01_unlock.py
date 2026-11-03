@@ -59,3 +59,20 @@ def build_dp71_unlock(properties: list[dict], timestamp: int) -> bytes:
         + b"\x00"  # mobile app method
         + bytes((member_id,))
     )
+
+
+def refresh_dp71_unlock(command: bytes, timestamp: int) -> bytes:
+    """Reuse a validated in-memory command with a new timestamp, without cloud I/O."""
+    if (
+        not isinstance(command, bytes)
+        or len(command) != 19
+        or command[:2] != b"\xff\xff"
+        or not 1 <= int.from_bytes(command[2:4], "big") <= 10000
+        or command[12] != 1
+        or command[17] != 0
+        or not 1 <= command[18] <= 100
+    ):
+        raise LA_T01UnlockDataError("No hay una orden DP71 local válida")
+    if not 0 < timestamp < 2**32:
+        raise LA_T01UnlockDataError("La fecha actual no cabe en DP71")
+    return command[:13] + timestamp.to_bytes(4, "big") + command[17:]
