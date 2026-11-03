@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .const import DOMAIN
@@ -24,6 +25,8 @@ from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 
 VOLUME_CONFIRM_TIMEOUT_SECONDS = 8
+VOLUME_APPLY_SETTLE_SECONDS = 10.0
+VOLUME_STORE_VERSION = 1
 
 
 @dataclass
@@ -115,9 +118,14 @@ class TuyaBLELASelect(TuyaBLESelect):
         device: TuyaBLEDevice,
         product: TuyaBLEProductInfo,
         mapping: TuyaBLESelectMapping,
+        entry_id: str,
     ) -> None:
         super().__init__(hass, coordinator, device, product, mapping)
+        self._store: Store[dict[str, str]] = Store(
+            hass, VOLUME_STORE_VERSION, f"{DOMAIN}.la_t01_volume.{entry_id}"
+        )
         self._confirmed_option: str | None = None
+        self._last_saved_option: str | None = None
         self._command_lock = asyncio.Lock()
         self._confirmation: asyncio.Future[bool] | None = None
         self._desired_value: int | None = None
@@ -143,6 +151,11 @@ class TuyaBLELASelect(TuyaBLESelect):
                 continue
             self._confirmed_option = self._attr_options[dp.value]
             self.async_write_ha_state()
+            if self._confirmed_option != self._last_saved_option:
+                self._last_saved_option = self._confirmed_option
+                self._store.async_delay_save(
+                    lambda: {"option": self._last_saved_option}, 1.0
+                )
             if (
                 self._confirmation is not None
                 and not self._confirmation.done()
@@ -155,6 +168,17 @@ class TuyaBLELASelect(TuyaBLESelect):
         self.async_on_remove(self._device.register_callback(self._handle_volume_updates))
 
         self._restore_last_volume_report()
+        if self._confirmed_option is None:
+            await self._restore_stored_volume_report()
+
+    async def _restore_stored_volume_report(self) -> None:
+        """Use the last known value when this session has no fresh DP31 report."""
+        saved = await self._store.async_load()
+        option = saved.get("option") if isinstance(saved, dict) else None
+        if self._confirmed_option is None and option in self._attr_options:
+            self._confirmed_option = option
+            self._last_saved_option = option
+            self.async_write_ha_state()
 
     @callback
     def _restore_last_volume_report(self) -> None:
@@ -171,6 +195,10 @@ class TuyaBLELASelect(TuyaBLESelect):
                     and 0 <= value < len(self._attr_options)
                 ):
                     self._confirmed_option = self._attr_options[value]
+                    self._last_saved_option = self._confirmed_option
+                    self._store.async_delay_save(
+                        lambda: {"option": self._last_saved_option}, 1.0
+                    )
                     self.async_write_ha_state()
                     return
 
@@ -196,10 +224,13 @@ class TuyaBLELASelect(TuyaBLESelect):
                 await datapoint.set_value(value)
                 touch = getattr(self._device, "_lock_power_saver_touch", None)
                 if touch is not None:
-                    touch(10.0)
+                    touch(VOLUME_APPLY_SETTLE_SECONDS + 2.0)
                 if not confirmation.done():
                     await self._device.update()
                 await asyncio.wait_for(confirmation, VOLUME_CONFIRM_TIMEOUT_SECONDS)
+                # This LA-T01 reported DP31 immediately but applied the sound
+                # only after a wait. Finish the HA action when it can be tested.
+                await asyncio.sleep(VOLUME_APPLY_SETTLE_SECONDS)
             except TimeoutError as err:
                 raise HomeAssistantError(
                     "La cerradura no confirmó DP31; comprueba el volumen físicamente"
@@ -217,15 +248,13 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
-    entities = [
-        (TuyaBLELASelect if data.device.product_id == PRODUCT_8GZA4O8A else TuyaBLESelect)(
-            hass,
-            data.coordinator,
-            data.device,
-            data.product,
-            item,
-        )
-        for item in get_mapping_by_device(data.device)
-        if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)
-    ]
+    entities = []
+    for item in get_mapping_by_device(data.device):
+        if not (item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)):
+            continue
+        args = (hass, data.coordinator, data.device, data.product, item)
+        if data.device.product_id == PRODUCT_8GZA4O8A:
+            entities.append(TuyaBLELASelect(*args, entry.entry_id))
+        else:
+            entities.append(TuyaBLESelect(*args))
     async_add_entities(entities)

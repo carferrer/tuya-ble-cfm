@@ -133,6 +133,8 @@ def test_la_t01_volume_connects_before_ble_write():
         _confirmation=None,
         _desired_value=None,
         _confirmed_option=None,
+        _last_saved_option=None,
+        _store=SimpleNamespace(async_delay_save=MagicMock()),
         async_write_ha_state=MagicMock(),
     )
 
@@ -147,13 +149,14 @@ def test_la_t01_volume_connects_before_ble_write():
         asyncio.run(select.TuyaBLELASelect.async_select_option(entity, "normal"))
 
     device.reconnect.assert_awaited_once_with()
-    settle.assert_awaited_once_with(0.5)
+    assert [args.args for args in settle.await_args_list] == [(0.5,), (10.0,)]
     device.datapoints.get_or_create.assert_called_once_with(31, TuyaBLEDataPointType.DT_ENUM, 2)
     datapoint.set_value.assert_awaited_once_with(2)
     device.update.assert_not_awaited()
     entity.async_write_ha_state.assert_called_once_with()
     assert entity._confirmed_option == "normal"
-    device._lock_power_saver_touch.assert_called_once_with(10.0)
+    entity._store.async_delay_save.assert_called_once()
+    device._lock_power_saver_touch.assert_called_once_with(12.0)
 
 
 def test_la_t01_volume_never_writes_without_ble_connection():
@@ -215,10 +218,32 @@ def test_la_t01_volume_restores_last_ble_report_not_send_cache():
         _mapping=SimpleNamespace(dp_id=31),
         _attr_options=["mute", "low", "normal", "high"],
         _confirmed_option=None,
+        _last_saved_option=None,
+        _store=SimpleNamespace(async_delay_save=MagicMock()),
         async_write_ha_state=MagicMock(),
     )
     select.TuyaBLELASelect._restore_last_volume_report(entity)
     assert entity._confirmed_option == "low"
+    entity.async_write_ha_state.assert_called_once_with()
+
+
+def test_la_t01_volume_restores_last_known_value_without_ble_report():
+    """A restart shows the saved DP31 value until the lock reports a newer one."""
+    entity = SimpleNamespace(
+        _store=SimpleNamespace(async_load=AsyncMock(return_value={"option": "low"})),
+        _attr_options=["mute", "low", "normal", "high"],
+        _confirmed_option=None,
+        _last_saved_option=None,
+        async_write_ha_state=MagicMock(),
+    )
+    asyncio.run(select.TuyaBLELASelect._restore_stored_volume_report(entity))
+    assert entity._confirmed_option == "low"
+    assert entity._last_saved_option == "low"
+    entity.async_write_ha_state.assert_called_once_with()
+
+    entity._confirmed_option = "normal"
+    asyncio.run(select.TuyaBLELASelect._restore_stored_volume_report(entity))
+    assert entity._confirmed_option == "normal"
     entity.async_write_ha_state.assert_called_once_with()
 
 
