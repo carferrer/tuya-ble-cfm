@@ -210,7 +210,7 @@ def test_la_t01_local_button_requires_seed_then_uses_ble_without_cloud():
     button = namespace["TuyaBLEDP71LocalTestButton"](
         None, SimpleNamespace(coordinator=None, device=device, product=None)
     )
-    with pytest.raises(RuntimeError, match="Primero prepara"):
+    with pytest.raises(RuntimeError, match="Preparar y abrir"):
         asyncio.run(button.async_press())
     assert events == []
 
