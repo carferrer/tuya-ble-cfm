@@ -70,7 +70,7 @@ def test_7a4xvbtt_exposes_reports_and_tested_dp6_controls():
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
 
 
-def test_la_t01_advertisement_is_selectable_and_entities_are_read_only():
+def test_la_t01_advertisement_is_selectable_without_unlock_controls():
     """The observed A201 advertisement must reach the manual device selector."""
     from custom_components.tuya_ble.tuya_ble import SERVICE_UUID_TEMP
 
@@ -82,6 +82,7 @@ def test_la_t01_advertisement_is_selectable_and_entities_are_read_only():
     assert config_flow._has_tuya_service(discovery)
     assert get_product_info_by_ids(device.category, device.product_id) is not None
     assert _platforms_for_device(device) == [
+        Platform.BUTTON,
         Platform.SENSOR,
         Platform.BINARY_SENSOR,
         Platform.EVENT,

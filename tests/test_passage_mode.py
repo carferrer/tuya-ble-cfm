@@ -330,7 +330,7 @@ def test_lock_and_passage_switch_platforms_load_for_supported_families():
         Platform.LOCK, Platform.SWITCH,
     ]
     assert select(SimpleNamespace(product_id="8gza4o8a")) == [
-        Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT,
+        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT,
     ]
     assert select(SimpleNamespace(product_id="unsupported")) == [
         Platform.BUTTON, Platform.SENSOR
