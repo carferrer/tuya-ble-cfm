@@ -64,6 +64,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
         ),
         "la_t01_unlock_tests": {
             "dp71_last_result": getattr(device, "_cfm_dp71_last_result", None),
+            "dp71_response_history": list(
+                getattr(device, "_cfm_dp71_response_history", [])
+            ),
         } if device.product_id == "8gza4o8a" else None,
         "record_recovery": {
             "dp69_request_count": int(

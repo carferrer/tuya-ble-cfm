@@ -102,6 +102,8 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         self._device._cfm_dp69_last_response = None
         self._device._cfm_dp69_last_error = None
         self._device._cfm_dp71_last_result = None
+        self._device._cfm_dp71_response_history = []
+        self._device._cfm_dp71_previous_verification = None
         device.register_connected_callback(self._async_handle_connect)
         device.register_callback(self._async_handle_update)
         device.register_disconnected_callback(self._async_handle_disconnect)
@@ -169,12 +171,21 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
                 if not isinstance(value, bytes):
                     continue
                 if datapoint.id == 71 and len(value) == 19:
-                    self._device._cfm_dp71_last_result = {
+                    verification = value[4:12]
+                    previous = self._device._cfm_dp71_previous_verification
+                    result = {
                         "received_at": time.time(),
                         "action": value[12],
                         "method": value[17],
                         "result_code": value[18],
+                        "same_verification_as_previous": (
+                            verification == previous if previous is not None else None
+                        ),
                     }
+                    self._device._cfm_dp71_last_result = result
+                    self._device._cfm_dp71_response_history.append(result)
+                    del self._device._cfm_dp71_response_history[:-20]
+                    self._device._cfm_dp71_previous_verification = verification
         received_event = {
             "received_at": time.time(),
             "gatt_connected": self._device.connected,

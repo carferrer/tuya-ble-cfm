@@ -81,6 +81,52 @@ def test_last_connection_sensor_uses_actual_connection_callback():
     assert listener_updates == [True]
 
 
+def test_la_t01_dp71_history_compares_replies_without_exposing_verification():
+    namespace = {
+        "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "PRODUCT_B3AOULUH": "b3aouluh",
+        "time": SimpleNamespace(time=lambda: 1793733266.0),
+    }
+    handle = _method("devices.py", "TuyaBLECoordinator", "_async_handle_update", namespace)
+    device = SimpleNamespace(
+        product_id="8gza4o8a",
+        connected=True,
+        _cfm_dp71_last_result=None,
+        _cfm_dp71_response_history=[],
+        _cfm_dp71_previous_verification=None,
+        _cfm_received_dp_events=[],
+    )
+    coordinator = SimpleNamespace(
+        _device=device,
+        _disconnected=False,
+        async_set_updated_data=lambda _: None,
+    )
+
+    def reply(verification):
+        value = b"\xff\xff\x00\x05" + verification + b"\x01\x6a\xe9\x8e\x7e\x00\x00"
+        assert len(value) == 19
+        return SimpleNamespace(
+            id=71, value=value, type=SimpleNamespace(name="DT_RAW"),
+            timestamp=1793733266, flags=0,
+        )
+
+    for verification in [b"secret01", b"secret01", b"secret02"]:
+        handle(coordinator, [reply(verification)])
+
+    assert [
+        item["same_verification_as_previous"]
+        for item in device._cfm_dp71_response_history
+    ] == [None, True, False]
+    assert [item["result_code"] for item in device._cfm_dp71_response_history] == [0, 0, 0]
+    assert all(event["datapoints"][0]["value"] == "<redacted>" for event in device._cfm_received_dp_events)
+    assert "secret01" not in repr(device._cfm_dp71_response_history)
+    assert "secret02" not in repr(device._cfm_dp71_response_history)
+
+    for _ in range(25):
+        handle(coordinator, [reply(b"secret02")])
+    assert len(device._cfm_dp71_response_history) == 20
+
+
 def test_update_interval_reports_zero_outside_periodic_mode():
     tree = ast.parse((ROOT / "sensor.py").read_text(encoding="utf-8"))
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == "TuyaBLESyncIntervalSensor")
