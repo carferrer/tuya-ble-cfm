@@ -142,6 +142,26 @@ class TuyaBLELASelect(TuyaBLESelect):
         await super().async_added_to_hass()
         self.async_on_remove(self._device.register_callback(self._handle_volume_updates))
 
+        self._restore_last_volume_report()
+
+    @callback
+    def _restore_last_volume_report(self) -> None:
+        """Recover a received DP31 report without trusting the send cache."""
+        # An initial BLE report can arrive before HA creates the select. Use
+        # the received-event history, never the datapoint cache changed by sends.
+        for event in reversed(getattr(self._device, "_cfm_received_dp_events", [])):
+            for report in reversed(event.get("datapoints", [])):
+                value = report.get("value")
+                if (
+                    report.get("id") == self._mapping.dp_id
+                    and report.get("type") == "DT_ENUM"
+                    and type(value) is int
+                    and 0 <= value < len(self._attr_options)
+                ):
+                    self._confirmed_option = self._attr_options[value]
+                    self.async_write_ha_state()
+                    return
+
     async def async_select_option(self, option: str) -> None:
         if option not in self._attr_options:
             raise HomeAssistantError(f"Unsupported lock volume: {option}")

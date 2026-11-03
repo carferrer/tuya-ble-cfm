@@ -197,6 +197,27 @@ def test_la_t01_volume_does_not_show_unconfirmed_write():
     assert entity._confirmed_option is None
 
 
+def test_la_t01_volume_restores_last_ble_report_not_send_cache():
+    """The observed low report wins over an optimistic mute cache value."""
+    device = SimpleNamespace(
+        datapoints={31: SimpleNamespace(value=0)},
+        _cfm_received_dp_events=[
+            {"datapoints": [{"id": 31, "type": "DT_ENUM", "value": 1}]},
+            {"datapoints": [{"id": 47, "type": "DT_BOOL", "value": False}]},
+        ],
+    )
+    entity = SimpleNamespace(
+        _device=device,
+        _mapping=SimpleNamespace(dp_id=31),
+        _attr_options=["mute", "low", "normal", "high"],
+        _confirmed_option=None,
+        async_write_ha_state=MagicMock(),
+    )
+    select.TuyaBLELASelect._restore_last_volume_report(entity)
+    assert entity._confirmed_option == "low"
+    entity.async_write_ha_state.assert_called_once_with()
+
+
 def test_existing_lock_credentials_load_without_cloud_and_missing_credentials_do_not_login():
     """An existing entry must never contact Tuya during runtime setup."""
     options = {
