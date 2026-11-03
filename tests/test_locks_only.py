@@ -17,7 +17,6 @@ def test_only_supported_lock_products_are_registered() -> None:
     assert '"b3aouluh"' in devices
 
     for product_id in (
-        "8gza4o8a",
         "ludzroix",
         "isk2p555",
         "3yqdo5yt",
@@ -27,6 +26,8 @@ def test_only_supported_lock_products_are_registered() -> None:
         "cdlandip",
     ):
         assert product_id not in devices
+
+    assert 'PRODUCT_8GZA4O8A = "8gza4o8a"' in devices
 
 
 def test_only_lock_platforms_are_loaded() -> None:

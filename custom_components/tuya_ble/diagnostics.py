@@ -39,7 +39,11 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             {
                 "id": dp_id,
                 "type": datapoint.type.name,
-                "value": _serialize_value(datapoint.value),
+                "value": (
+                    "<redacted>"
+                    if device.product_id == "8gza4o8a" and dp_id in (70, 71)
+                    else _serialize_value(datapoint.value)
+                ),
                 "timestamp": datapoint.timestamp,
             }
         )
@@ -48,6 +52,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
     idle_task = getattr(device, "_lock_power_saver_idle_task", None)
 
     return {
+        "offline_ble_credentials_stored": runtime.manager._has_credentials(
+            entry.options
+        ),
         "connected": device.connected,
         "gatt_connected": bool(client is not None and client.is_connected),
         "paired": bool(getattr(device, "_is_paired", False)),
@@ -58,6 +65,18 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
         "received_dp_events": list(
             getattr(device, "_cfm_received_dp_events", [])
         ),
+        "la_t01_unlock_tests": {
+            "dp71_last_result": getattr(device, "_cfm_dp71_last_result", None),
+            "dp71_local_ready": bool(
+                getattr(device, "_cfm_dp71_local_command", None)
+            ),
+            "dp71_local_persisted": bool(
+                getattr(device, "_cfm_dp71_local_persisted", False)
+            ),
+            "dp71_response_history": list(
+                getattr(device, "_cfm_dp71_response_history", [])
+            ),
+        } if device.product_id == "8gza4o8a" else None,
         "record_recovery": {
             "dp69_request_count": int(
                 getattr(device, "_cfm_dp69_request_count", 0)

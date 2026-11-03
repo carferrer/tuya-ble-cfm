@@ -12,14 +12,24 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .button import async_press_dp71_local_unlock, build_local_dp71_command
 from .const import DOMAIN
-from .devices import PRODUCT_7A4XVBTT, PRODUCT_B3AOULUH, TuyaBLEData, TuyaBLEEntity
+from .devices import (
+    PRODUCT_7A4XVBTT,
+    PRODUCT_8GZA4O8A,
+    PRODUCT_B3AOULUH,
+    TuyaBLEData,
+    TuyaBLEEntity,
+)
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 _LOGGER = logging.getLogger(__name__)
 DP_PASSAGE_MODE_CANDIDATE = 33
 CONFIRM_TIMEOUT_SECONDS = 15
 PASSAGE_CONNECT_SETTLE_SECONDS = 0.5
+PASSAGE_LA_UNLOCK_DELAY_SECONDS = 0.5
+INVERTED_PASSAGE_PRODUCTS = (PRODUCT_7A4XVBTT, PRODUCT_8GZA4O8A)
+PASSAGE_PRODUCTS = (PRODUCT_B3AOULUH, *INVERTED_PASSAGE_PRODUCTS)
 
 
 class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
@@ -44,16 +54,21 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
         self._desired_state: bool | None = None
 
     def _passage_state(self, dp33_value: bool) -> bool:
-        """The 7a4xvbtt app enables free passage by disabling automatic locking."""
+        """Interpret DP33 with this product's passage-mode polarity."""
         return (
             not dp33_value
-            if self._device.product_id == PRODUCT_7A4XVBTT
+            if self._device.product_id in INVERTED_PASSAGE_PRODUCTS
             else dp33_value
         )
 
     @property
     def available(self) -> bool:
-        """Only offer controls after the lock has reported a Boolean DP33."""
+        """Allow LA-T01 testing before its first BLE DP33 report."""
+        if self._device.product_id == PRODUCT_8GZA4O8A:
+            # Cloud schema declares DP33, but this unit has not yet reported it
+            # over BLE. Let the owner test a write and require a BLE reply.
+            dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
+            return dp is None or dp.type == TuyaBLEDataPointType.DT_BOOL
         lock_state = getattr(self._device, "_cfm_lock_state", None)
         if lock_state is not None and lock_state.get(DP_PASSAGE_MODE_CANDIDATE) is not None:
             return True
@@ -98,21 +113,36 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
             self._attr_is_on = self._passage_state(bool(dp.value))
 
     async def _set_mode(self, desired: bool) -> None:
-        if self._device.product_id not in (PRODUCT_B3AOULUH, PRODUCT_7A4XVBTT):
+        if self._device.product_id not in PASSAGE_PRODUCTS:
             raise HomeAssistantError("Passage-mode control is unavailable for this lock")
+        if self._device.product_id == PRODUCT_8GZA4O8A:
+            # Avoid changing DP33 if the required local opening is not ready.
+            build_local_dp71_command(self._device)
         dp33_desired = (
-            not desired if self._device.product_id == PRODUCT_7A4XVBTT else desired
+            not desired if self._device.product_id in INVERTED_PASSAGE_PRODUCTS else desired
         )
 
         async with self._command_lock:
             was_disconnected = (
-                self._device.product_id == PRODUCT_7A4XVBTT
+                self._device.product_id in INVERTED_PASSAGE_PRODUCTS
                 and not self._device.connected
             )
             dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
             if dp is None:
                 await self._device.reconnect_and_update()
                 dp = self._device.datapoints[DP_PASSAGE_MODE_CANDIDATE]
+            if dp is None and self._device.product_id == PRODUCT_8GZA4O8A:
+                if not self._device.connected:
+                    await self._device.reconnect()
+                if not self._device.connected:
+                    raise HomeAssistantError(
+                        "Lock did not establish a paired BLE connection"
+                    )
+                dp = self._device.datapoints.get_or_create(
+                    DP_PASSAGE_MODE_CANDIDATE,
+                    TuyaBLEDataPointType.DT_BOOL,
+                    dp33_desired,
+                )
             if dp is None or dp.type != TuyaBLEDataPointType.DT_BOOL:
                 raise HomeAssistantError("Lock has not reported a Boolean DP33")
             if was_disconnected:
@@ -130,6 +160,9 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
                 # set_value changes the transport cache before writing. The
                 # callback above accepts only a subsequent device report.
                 await dp.set_value(dp33_desired)
+                if self._device.product_id == PRODUCT_8GZA4O8A:
+                    await asyncio.sleep(PASSAGE_LA_UNLOCK_DELAY_SECONDS)
+                    await async_press_dp71_local_unlock(self._device)
                 await asyncio.wait_for(confirmation, CONFIRM_TIMEOUT_SECONDS)
             except TimeoutError as err:
                 _LOGGER.warning(
@@ -159,7 +192,7 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
-    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_7A4XVBTT):
+    if data.device.product_id in PASSAGE_PRODUCTS:
         registry = er.async_get(hass)
         entity_id = registry.async_get_entity_id(
             "switch", DOMAIN, f"{data.device.device_id}-passage_mode_experimental"

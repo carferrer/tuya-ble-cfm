@@ -273,6 +273,7 @@ def test_setup_only_adds_alarm_for_validated_product(code):
             "PRODUCT_B3AOULUH": "b3aouluh",
             "PRODUCT_OKKYFGFS": "okkyfgfs",
             "PRODUCT_7A4XVBTT": "7a4xvbtt",
+            "PRODUCT_8GZA4O8A": "8gza4o8a",
         }
     )
     # Load the real platform setup with an inert access entity constructor.
@@ -292,6 +293,7 @@ def test_setup_only_adds_alarm_for_validated_product(code):
         ("b3aouluh", 2),
         ("okkyfgfs", 2),
         ("7a4xvbtt", 2),
+        ("8gza4o8a", 2),
         ("unsupported", 0),
     ]:
         added = []

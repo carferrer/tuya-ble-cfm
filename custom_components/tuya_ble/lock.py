@@ -1,4 +1,4 @@
-"""Lock entity backed by each supported lock's motor state and DP6 command."""
+"""Lock entities backed by each supported product's motor state and unlock command."""
 
 from __future__ import annotations
 
@@ -7,10 +7,11 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .button import async_press_bluetooth_unlock
+from .button import async_press_bluetooth_unlock, async_press_dp71_local_unlock
 from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
+    PRODUCT_8GZA4O8A,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
@@ -69,13 +70,20 @@ class TuyaBLEMotorLock(TuyaBLEEntity, LockEntity):
         ):
             self._attr_is_locked = not dp.value
 
+    async def _async_send_unlock(self) -> None:
+        """Use the product's existing local Open button path."""
+        if self._device.product_id == PRODUCT_8GZA4O8A:
+            await async_press_dp71_local_unlock(self._device)
+        else:
+            await async_press_bluetooth_unlock(self._device)
+
     async def async_lock(self, **kwargs) -> None:
-        """Send the same DP6 command as the existing Open button."""
-        await async_press_bluetooth_unlock(self._device)
+        """Actuate the lock; DP47 reports the resulting state."""
+        await self._async_send_unlock()
 
     async def async_unlock(self, **kwargs) -> None:
-        """Send the same DP6 command as the existing Open button."""
-        await async_press_bluetooth_unlock(self._device)
+        """Actuate the lock; DP47 reports the resulting state."""
+        await self._async_send_unlock()
 
 
 async def async_setup_entry(
@@ -88,5 +96,6 @@ async def async_setup_entry(
         PRODUCT_B3AOULUH,
         PRODUCT_OKKYFGFS,
         PRODUCT_7A4XVBTT,
+        PRODUCT_8GZA4O8A,
     ):
         async_add_entities([TuyaBLEMotorLock(hass, data)])

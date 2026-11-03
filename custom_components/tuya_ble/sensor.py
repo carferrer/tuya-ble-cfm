@@ -33,6 +33,7 @@ from .connection_policy import CONNECTION_MODE_PERIODIC_SYNC, connection_mode, s
 from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
+    PRODUCT_8GZA4O8A,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
@@ -98,6 +99,10 @@ mapping = {
         ]
     },
     "jtmspro": {
+        PRODUCT_8GZA4O8A: [
+            alarm_mapping(),
+            TuyaBLEBatteryMapping(dp_id=8),
+        ],
         "b3aouluh": [
             alarm_mapping(),
             TuyaBLESensorMapping(
@@ -364,6 +369,67 @@ class TuyaBLELastConnectedSensor(TuyaBLEEntity, SensorEntity):
         self.async_write_ha_state()
 
 
+def connected_proxy_name(device: TuyaBLEDevice) -> str | None:
+    """Identify the backend that actually connected, not the last advertiser."""
+    if not device.connected:
+        return None
+    backend = getattr(getattr(device, "_client", None), "_backend", None)
+    source = getattr(backend, "_source", None)
+    friendly_name = getattr(getattr(backend, "_device_info", None), "friendly_name", None)
+    if isinstance(friendly_name, str) and (friendly_name := friendly_name.strip()):
+        if isinstance(source, str) and source:
+            return f"{friendly_name} [{source}]"
+        return friendly_name
+    name = getattr(backend, "_source_name", None)
+    if isinstance(name, str) and name:
+        return name
+    return source if isinstance(source, str) and source else None
+
+
+class TuyaBLELastProxySensor(TuyaBLEEntity, SensorEntity):
+    """Show the proxy used for the latest paired GATT connection."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass,
+            data.coordinator,
+            data.device,
+            data.product,
+            SensorEntityDescription(
+                key="last_bluetooth_proxy",
+                name="Último proxy Bluetooth",
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+        )
+        self._store: Store[dict[str, str]] = Store(
+            hass, 1, f"{DOMAIN}.last_bluetooth_proxy.{entry.entry_id}"
+        )
+
+    @property
+    def available(self) -> bool:
+        """The last successful proxy remains useful after a disconnection."""
+        return True
+
+    @callback
+    def _handle_connection(self) -> None:
+        name = connected_proxy_name(self._device)
+        if name is not None and name != self.native_value:
+            self._attr_native_value = name
+            self._store.async_delay_save(lambda: {"name": name}, 1.0)
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._device.register_connected_callback(self._handle_connection))
+        self._handle_connection()
+        if self.native_value is None:
+            stored = await self._store.async_load()
+            name = stored.get("name") if isinstance(stored, dict) else None
+            if self.native_value is None and isinstance(name, str) and name:
+                self._attr_native_value = name
+                self.async_write_ha_state()
+
+
 class TuyaBLESyncIntervalSensor(SensorEntity):
     """Effective configured periodic BLE synchronization interval."""
 
@@ -391,6 +457,7 @@ async def async_setup_entry(
     mappings = get_mapping_by_device(data.device)
     entities: list[SensorEntity] = [
         TuyaBLELastConnectedSensor(hass, data),
+        TuyaBLELastProxySensor(hass, entry, data),
         TuyaBLESyncIntervalSensor(entry, data.device),
         TuyaBLESensor(
             hass,
@@ -414,6 +481,11 @@ async def async_setup_entry(
                         hass, data.coordinator, data.device, data.product, item
                     )
                 )
-    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS, PRODUCT_7A4XVBTT):
+    if data.device.product_id in (
+        PRODUCT_B3AOULUH,
+        PRODUCT_OKKYFGFS,
+        PRODUCT_7A4XVBTT,
+        PRODUCT_8GZA4O8A,
+    ):
         entities.append(TuyaBLELastAccessSensor(hass, entry, data.device))
     async_add_entities(entities)

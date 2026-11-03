@@ -99,6 +99,27 @@ def send(device, data):
         device._notification_handler(0, bytearray(part))
 
 
+def test_la_t01_debug_does_not_dump_packet_bytes(device, caplog):
+    """Keep the previous debug behavior for other locks only."""
+    device.product_id = "8gza4o8a"
+    with caplog.at_level(logging.DEBUG):
+        send(device, frame(device))
+    assert len(device.received) == 1
+    assert not any("Packet received:" in record.message for record in caplog.records)
+
+    caplog.clear()
+    with caplog.at_level(logging.DEBUG):
+        send(device, frame(device, b"private-value", code=0x7FFF))
+    assert "private-value".encode().hex() not in caplog.text
+    assert "<redacted>" in caplog.text
+
+    caplog.clear()
+    device.product_id = "b3aouluh"
+    with caplog.at_level(logging.DEBUG):
+        send(device, frame(device))
+    assert any("Packet received:" in record.message for record in caplog.records)
+
+
 @pytest.mark.parametrize(
     "data",
     [

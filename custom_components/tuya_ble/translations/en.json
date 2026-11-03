@@ -107,6 +107,9 @@
             "beep_volume": {
                 "name": "Lock Volume"
             },
+            "beep_volume_experimental": {
+                "name": "Lock Volume (experimental)"
+            },
             "language": {
                 "name": "Lock Language"
             },

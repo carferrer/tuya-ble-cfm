@@ -93,10 +93,17 @@ _cache: dict[str, TuyaCloudCacheItem] = {}
 class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
     """Cloud connected manager of the Tuya BLE devices credentials."""
 
-    def __init__(self, hass: HomeAssistant, data: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        data: dict[str, Any],
+        *,
+        allow_cloud_credentials: bool = True,
+    ) -> None:
         assert hass is not None
         self._hass = hass
         self._data = data
+        self._allow_cloud_credentials = allow_cloud_credentials
 
     @staticmethod
     def _is_login_success(response: dict[Any, Any]) -> bool:
@@ -116,9 +123,18 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
     @staticmethod
     def _has_credentials(data: dict[Any, Any]) -> bool:
-        for key in CONF_TUYA_DEVICE_KEYS:
-            if data.get(key) is None:
+        """Only the BLE pairing fields are required for offline operation."""
+        for key in (
+            CONF_UUID,
+            CONF_LOCAL_KEY,
+            CONF_DEVICE_ID,
+            CONF_CATEGORY,
+            CONF_PRODUCT_ID,
+        ):
+            if not isinstance(data.get(key), str) or not data[key]:
                 return False
+        if len(data[CONF_LOCAL_KEY]) < 6:
+            return False
         return True
 
     async def _login(self, data: dict[str, Any], add_to_cache: bool) -> dict[Any, Any]:
@@ -166,6 +182,31 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
     async def login(self, add_to_cache: bool = False) -> dict[Any, Any]:
         return await self._login(self._data, add_to_cache)
+
+    async def get_lock_unlock_properties(self, device_id: str) -> list[dict]:
+        """Read the LA-T01's latest DP19/70/71 cloud reports for a test command."""
+        if not self._has_login(self._data):
+            raise ValueError("Faltan credenciales de Tuya Cloud para probar DP71")
+        cache_key = self._get_cache_key(self._data)
+        item = _cache.get(cache_key)
+        if item is None or item.api is None:
+            if not self._is_login_success(await self.login(True)):
+                raise ValueError("No se pudo iniciar sesión en Tuya Cloud para probar DP71")
+            item = _cache.get(cache_key)
+        if item is None or item.api is None:
+            raise ValueError("No hay sesión de Tuya Cloud para probar DP71")
+
+        response = await self._hass.async_add_executor_job(
+            item.api.get,
+            f"/v2.0/cloud/thing/{device_id}/shadow/properties",
+        )
+        if not response.get(TUYA_RESPONSE_SUCCESS):
+            raise ValueError("No se pudieron consultar los DP de la cerradura en Tuya Cloud")
+        result = response.get(TUYA_RESPONSE_RESULT)
+        properties = result.get("properties") if isinstance(result, dict) else None
+        if not isinstance(properties, list):
+            raise ValueError("Tuya Cloud no devolvió propiedades de la cerradura")
+        return properties
 
     async def _fill_cache_item(self, item: TuyaCloudCacheItem) -> None:
         devices_response = await self._hass.async_add_executor_job(
@@ -281,6 +322,10 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
         if not force_update and self._has_credentials(self._data):
             credentials = self._data.copy()
         else:
+            # Setup of an existing entry must never depend on Tuya Cloud.
+            # The options flow may still refresh credentials explicitly.
+            if not self._allow_cloud_credentials and not force_update:
+                return None
             cache_key: str | None = None
             if self._has_login(self._data):
                 cache_key = self._get_cache_key(self._data)

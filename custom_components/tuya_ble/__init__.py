@@ -19,16 +19,18 @@ from homeassistant.helpers.event import async_track_time_interval
 
 from .tuya_ble import TuyaBLEDevice
 
-from .cloud import HASSTuyaBLEDeviceManager
-from .const import DOMAIN
+from .cloud import CONF_TUYA_DEVICE_KEYS, HASSTuyaBLEDeviceManager
+from .const import CONF_FUNCTIONS, CONF_STATUS_RANGE, DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
+    PRODUCT_8GZA4O8A,
     TuyaBLECoordinator,
     TuyaBLEData,
     get_device_product_info,
 )
 from .lock_power_saver import enable_lock_power_saver
 from .lock_state import TuyaBLELockState
+from .la_t01_session import LA_T01OfflineSession
 
 PLATFORMS: list[Platform] = [
     Platform.BUTTON,
@@ -55,6 +57,18 @@ def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
             Platform.BUTTON,
             Platform.SENSOR,
             Platform.BINARY_SENSOR,
+            Platform.EVENT,
+            Platform.LOCK,
+            Platform.SWITCH,
+        ]
+    if device.product_id == PRODUCT_8GZA4O8A:
+        # LA-T01 uses local DP71 for its lock entity; DP6 remains absent.
+        # DP31 and experimental DP33 controls are product specific.
+        return [
+            Platform.BUTTON,
+            Platform.SENSOR,
+            Platform.BINARY_SENSOR,
+            Platform.SELECT,
             Platform.EVENT,
             Platform.LOCK,
             Platform.SWITCH,
@@ -102,9 +116,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             f"Could not find Tuya BLE device with address {address}"
         )
 
-    manager = HASSTuyaBLEDeviceManager(hass, entry.options.copy())
+    stored_credentials = HASSTuyaBLEDeviceManager._has_credentials(entry.options)
+    manager = HASSTuyaBLEDeviceManager(
+        hass, entry.options.copy(), allow_cloud_credentials=not stored_credentials
+    )
+    if not stored_credentials:
+        # Migrate older entries once; every subsequent startup uses the saved
+        # BLE credentials even when Tuya Cloud is unavailable.
+        credentials = await manager.get_device_credentials(address, save_data=True)
+        if credentials is None:
+            raise ConfigEntryNotReady(
+                "Stored Tuya BLE credentials are missing and could not be refreshed"
+            )
+        options = entry.options.copy()
+        for key in (*CONF_TUYA_DEVICE_KEYS, CONF_FUNCTIONS, CONF_STATUS_RANGE):
+            if key in manager.data:
+                options[key] = manager.data[key]
+        hass.config_entries.async_update_entry(entry, options=options)
     device = TuyaBLEDevice(manager, ble_device)
     await device.initialize()
+    if not device.uuid or not device.device_id or len(device.local_key) < 6:
+        raise ConfigEntryNotReady(
+            "Stored Tuya BLE credentials are missing; refresh this entry's options "
+            "once while Internet is available"
+        )
 
     enable_lock_power_saver(device)
 
@@ -121,6 +156,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     entry.async_on_unload(lock_state.unregister)
 
     coordinator = TuyaBLECoordinator(hass, device)
+    if device.product_id == PRODUCT_8GZA4O8A:
+        offline_session = LA_T01OfflineSession(hass, entry.entry_id, device)
+        device._cfm_dp71_session = offline_session
+        await offline_session.async_load()
 
     # Keep the initial update behaviour of the hardware-tested implementation.
     hass.add_job(device.update())

@@ -1230,7 +1230,7 @@ class TuyaBLEDevice:
                 self.address,
                 id,
                 type.name,
-                value,
+                "<redacted>" if getattr(self, "product_id", None) == "8gza4o8a" and id in (70, 71) else value,
             )
             self._datapoints._update_from_device(
                 id, timestamp, flags, type, value)
@@ -1410,7 +1410,9 @@ class TuyaBLEDevice:
                 seq_num,
                 _code,
                 response_to,
-                data.hex(),
+                "<redacted>"
+                if getattr(self, "product_id", None) == "8gza4o8a"
+                else data.hex(),
             )
             return
 
@@ -1442,7 +1444,10 @@ class TuyaBLEDevice:
 
     def _receive_notification(self, data: bytearray) -> None:
         """Reassemble ordered fragments; restart only at a new frame boundary."""
-        _LOGGER.debug("%s: Packet received: %s", self.address, data.hex())
+        # LA-T01 DP71 can carry a reusable verification value. Avoid dumping
+        # this lock's raw packet fragments into debug logs.
+        if getattr(self, "product_id", None) != "8gza4o8a":
+            _LOGGER.debug("%s: Packet received: %s", self.address, data.hex())
 
         pos: int = 0
         packet_num: int
@@ -1507,7 +1512,7 @@ class TuyaBLEDevice:
                 self.address,
                 dp.id,
                 dp.type.name,
-                dp.value,
+                "<redacted>" if getattr(self, "product_id", None) == "8gza4o8a" and dp.id in (70, 71) else dp.value,
             )
             data += pack(">BBB", dp.id, int(dp.type.value), len(value))
             data += value
