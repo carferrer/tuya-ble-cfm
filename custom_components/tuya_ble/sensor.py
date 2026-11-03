@@ -374,10 +374,15 @@ def connected_proxy_name(device: TuyaBLEDevice) -> str | None:
     if not device.connected:
         return None
     backend = getattr(getattr(device, "_client", None), "_backend", None)
+    source = getattr(backend, "_source", None)
+    friendly_name = getattr(getattr(backend, "_device_info", None), "friendly_name", None)
+    if isinstance(friendly_name, str) and (friendly_name := friendly_name.strip()):
+        if isinstance(source, str) and source:
+            return f"{friendly_name} [{source}]"
+        return friendly_name
     name = getattr(backend, "_source_name", None)
     if isinstance(name, str) and name:
         return name
-    source = getattr(backend, "_source", None)
     return source if isinstance(source, str) and source else None
 
 

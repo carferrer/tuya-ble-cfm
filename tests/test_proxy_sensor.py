@@ -101,7 +101,11 @@ def test_last_proxy_is_from_connected_backend_and_survives_disconnect_and_restar
     device._ble_device = SimpleNamespace(details={"source": "wrong-advertiser"})
     device.connected = True
     device._client = SimpleNamespace(
-        _backend=SimpleNamespace(_source_name="Proxy salón [F4:65:0B:40:09:66]")
+        _backend=SimpleNamespace(
+            _source_name="proxy-salon [F4:65:0B:40:09:66]",
+            _source="F4:65:0B:40:09:66",
+            _device_info=SimpleNamespace(friendly_name="Proxy salón"),
+        )
     )
     callbacks[0]()
     assert sensor.native_value == "Proxy salón [F4:65:0B:40:09:66]"
@@ -117,17 +121,29 @@ def test_last_proxy_is_from_connected_backend_and_survives_disconnect_and_restar
     assert restored.native_value == "Proxy salón [F4:65:0B:40:09:66]"
 
 
-def test_last_proxy_falls_back_to_backend_source_and_ignores_missing_backend():
+def test_last_proxy_falls_back_to_technical_name_then_source():
     FakeStore.values.clear()
     sensor_class = _proxy_sensor_class()
     device = SimpleNamespace(
         connected=True,
-        _client=SimpleNamespace(_backend=SimpleNamespace(_source="AA:BB:CC:DD:EE:FF")),
+        _client=SimpleNamespace(
+            _backend=SimpleNamespace(
+                _source="AA:BB:CC:DD:EE:FF",
+                _source_name="proxy-pasillo [AA:BB:CC:DD:EE:FF]",
+                _device_info=SimpleNamespace(friendly_name="  "),
+            )
+        ),
         register_connected_callback=lambda callback: lambda: None,
     )
     data = SimpleNamespace(device=device, coordinator=None, product=None)
     sensor = sensor_class(None, SimpleNamespace(entry_id="lock-2"), data)
     asyncio.run(sensor.async_added_to_hass())
+    assert sensor.native_value == "proxy-pasillo [AA:BB:CC:DD:EE:FF]"
+
+    device._client = SimpleNamespace(
+        _backend=SimpleNamespace(_source="AA:BB:CC:DD:EE:FF")
+    )
+    sensor._handle_connection()
     assert sensor.native_value == "AA:BB:CC:DD:EE:FF"
 
     device._client = SimpleNamespace(_backend=SimpleNamespace())
