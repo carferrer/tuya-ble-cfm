@@ -93,10 +93,17 @@ _cache: dict[str, TuyaCloudCacheItem] = {}
 class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
     """Cloud connected manager of the Tuya BLE devices credentials."""
 
-    def __init__(self, hass: HomeAssistant, data: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        data: dict[str, Any],
+        *,
+        allow_cloud_credentials: bool = True,
+    ) -> None:
         assert hass is not None
         self._hass = hass
         self._data = data
+        self._allow_cloud_credentials = allow_cloud_credentials
 
     @staticmethod
     def _is_login_success(response: dict[Any, Any]) -> bool:
@@ -116,9 +123,18 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
     @staticmethod
     def _has_credentials(data: dict[Any, Any]) -> bool:
-        for key in CONF_TUYA_DEVICE_KEYS:
-            if data.get(key) is None:
+        """Only the BLE pairing fields are required for offline operation."""
+        for key in (
+            CONF_UUID,
+            CONF_LOCAL_KEY,
+            CONF_DEVICE_ID,
+            CONF_CATEGORY,
+            CONF_PRODUCT_ID,
+        ):
+            if not isinstance(data.get(key), str) or not data[key]:
                 return False
+        if len(data[CONF_LOCAL_KEY]) < 6:
+            return False
         return True
 
     async def _login(self, data: dict[str, Any], add_to_cache: bool) -> dict[Any, Any]:
@@ -306,6 +322,10 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
         if not force_update and self._has_credentials(self._data):
             credentials = self._data.copy()
         else:
+            # Setup of an existing entry must never depend on Tuya Cloud.
+            # The options flow may still refresh credentials explicitly.
+            if not self._allow_cloud_credentials and not force_update:
+                return None
             cache_key: str | None = None
             if self._has_login(self._data):
                 cache_key = self._get_cache_key(self._data)

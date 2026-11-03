@@ -194,13 +194,20 @@ class TuyaBLEDP71TestButton(TuyaBLEEntity, ButtonEntity):
                 command = build_dp71_unlock(properties, int(time.time()))
             except ValueError as err:
                 raise HomeAssistantError(str(err)) from err
-            # The reply may arrive before set_value returns. Publish the seed
-            # first so a failed DP71 reply can clear it in the coordinator.
-            self._device._cfm_dp71_local_command = command
+            # Save before sending: a failed device reply can then invalidate
+            # both memory and disk in the coordinator, even if it arrives early.
+            session = getattr(self._device, "_cfm_dp71_session", None)
+            if session is not None:
+                await session.async_save_command(command)
+            else:
+                self._device._cfm_dp71_local_command = command
             try:
                 await datapoint.set_value(command)
             except BaseException:
-                self._device._cfm_dp71_local_command = None
+                if session is not None:
+                    await session.async_clear()
+                else:
+                    self._device._cfm_dp71_local_command = None
                 raise
 
 
@@ -236,7 +243,7 @@ class TuyaBLEDP71LocalTestButton(TuyaBLEEntity, ButtonEntity):
             cached = getattr(self._device, "_cfm_dp71_local_command", None)
             if cached is None:
                 raise HomeAssistantError(
-                    "Primero pulsa «Prueba abrir DP71» con Internet en esta sesión de HA"
+                    "Primero prepara DP71 con el botón original y acceso a Internet"
                 )
             try:
                 command = refresh_dp71_unlock(cached, int(time.time()))

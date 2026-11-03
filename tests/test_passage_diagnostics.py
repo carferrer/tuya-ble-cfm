@@ -126,6 +126,13 @@ def test_la_t01_dp71_history_compares_replies_without_exposing_verification():
         handle(coordinator, [reply(b"secret02")])
     assert len(device._cfm_dp71_response_history) == 20
 
+    invalidations = []
+
+    def invalidate():
+        invalidations.append(True)
+        device._cfm_dp71_local_command = None
+
+    device._cfm_dp71_session = SimpleNamespace(invalidate=invalidate)
     device._cfm_dp71_local_command = b"private-seed"
     handle(coordinator, [SimpleNamespace(
         id=70, value=b"new-pairing", type=SimpleNamespace(name="DT_RAW"),
@@ -139,6 +146,7 @@ def test_la_t01_dp71_history_compares_replies_without_exposing_verification():
     failed.value = failed.value[:-1] + b"\x03"
     handle(coordinator, [failed])
     assert device._cfm_dp71_local_command is None
+    assert invalidations == [True, True]
 
 
 def test_update_interval_reports_zero_outside_periodic_mode():

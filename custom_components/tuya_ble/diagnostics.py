@@ -52,6 +52,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
     idle_task = getattr(device, "_lock_power_saver_idle_task", None)
 
     return {
+        "offline_ble_credentials_stored": runtime.manager._has_credentials(
+            entry.options
+        ),
         "connected": device.connected,
         "gatt_connected": bool(client is not None and client.is_connected),
         "paired": bool(getattr(device, "_is_paired", False)),
@@ -66,6 +69,9 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "dp71_last_result": getattr(device, "_cfm_dp71_last_result", None),
             "dp71_local_ready": bool(
                 getattr(device, "_cfm_dp71_local_command", None)
+            ),
+            "dp71_local_persisted": bool(
+                getattr(device, "_cfm_dp71_local_persisted", False)
             ),
             "dp71_response_history": list(
                 getattr(device, "_cfm_dp71_response_history", [])

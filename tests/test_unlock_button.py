@@ -109,12 +109,23 @@ def test_la_t01_dp71_button_fetches_cloud_report_and_sends_once():
     async def send(value):
         events.append(("ble", value))
 
+    async def save(value):
+        events.append(("save", value))
+        device._cfm_dp71_local_command = value
+
+    async def clear():
+        events.append("clear")
+        device._cfm_dp71_local_command = None
+
     datapoint.set_value = send
     device = SimpleNamespace(
         product_id="8gza4o8a",
         device_id="device123",
         connected=True,
         datapoints=SimpleNamespace(get_or_create=lambda *args: datapoint),
+        _cfm_dp71_session=SimpleNamespace(
+            async_save_command=save, async_clear=clear
+        ),
     )
     manager = SimpleNamespace(get_lock_unlock_properties=fetch)
     namespace = {
@@ -136,7 +147,11 @@ def test_la_t01_dp71_button_fetches_cloud_report_and_sends_once():
         None, SimpleNamespace(coordinator=None, device=device, product=None, manager=manager)
     )
     asyncio.run(button.async_press())
-    assert events == [("cloud", "device123"), ("ble", b"one-fresh-command")]
+    assert events == [
+        ("cloud", "device123"),
+        ("save", b"one-fresh-command"),
+        ("ble", b"one-fresh-command"),
+    ]
     assert device._cfm_dp71_local_command == b"one-fresh-command"
 
     async def failed_send(value):
@@ -146,6 +161,7 @@ def test_la_t01_dp71_button_fetches_cloud_report_and_sends_once():
     with pytest.raises(RuntimeError, match="BLE write failed"):
         asyncio.run(button.async_press())
     assert device._cfm_dp71_local_command is None
+    assert events[-2:] == [("save", b"one-fresh-command"), "clear"]
 
 
 def test_la_t01_local_button_requires_seed_then_uses_ble_without_cloud():
@@ -194,7 +210,7 @@ def test_la_t01_local_button_requires_seed_then_uses_ble_without_cloud():
     button = namespace["TuyaBLEDP71LocalTestButton"](
         None, SimpleNamespace(coordinator=None, device=device, product=None)
     )
-    with pytest.raises(RuntimeError, match="Primero pulsa"):
+    with pytest.raises(RuntimeError, match="Primero prepara"):
         asyncio.run(button.async_press())
     assert events == []
 

@@ -7,12 +7,22 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from homeassistant.const import CONF_ADDRESS, Platform
+from homeassistant.const import CONF_ADDRESS, CONF_DEVICE_ID, Platform
 from homeassistant.exceptions import ConfigEntryNotReady
 
 from custom_components.tuya_ble import _platforms_for_device, async_setup_entry
 from custom_components.tuya_ble import binary_sensor, button, config_flow, select, sensor
 from custom_components.tuya_ble.devices import get_product_info_by_ids
+from custom_components.tuya_ble.cloud import HASSTuyaBLEDeviceManager
+from custom_components.tuya_ble.const import (
+    CONF_CATEGORY,
+    CONF_DEVICE_NAME,
+    CONF_LOCAL_KEY,
+    CONF_PRODUCT_MODEL,
+    CONF_PRODUCT_NAME,
+    CONF_PRODUCT_ID,
+    CONF_UUID,
+)
 
 
 @pytest.mark.parametrize(
@@ -85,6 +95,35 @@ def test_la_t01_exposes_refresh_and_dp71_without_dp6():
     assert select.get_mapping_by_device(device) == []
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
+
+
+def test_existing_lock_credentials_load_without_cloud_and_missing_credentials_do_not_login():
+    """An existing entry must never contact Tuya during runtime setup."""
+    options = {
+        CONF_UUID: "configured-uuid",
+        CONF_LOCAL_KEY: "configured-local-key",
+        CONF_DEVICE_ID: "lock-1",
+        CONF_CATEGORY: "jtmspro",
+        CONF_PRODUCT_ID: "b3aouluh",
+        CONF_DEVICE_NAME: "Cerradura",
+        CONF_PRODUCT_MODEL: "",
+        CONF_PRODUCT_NAME: "Smart Lock",
+    }
+    manager = HASSTuyaBLEDeviceManager(
+        MagicMock(), options, allow_cloud_credentials=False
+    )
+    manager.login = AsyncMock(side_effect=AssertionError("Unexpected Tuya Cloud login"))
+    credentials = asyncio.run(manager.get_device_credentials("AA:BB:CC:DD:EE:FF"))
+    assert credentials.device_id == "lock-1"
+    manager.login.assert_not_awaited()
+
+    manager.data.pop(CONF_PRODUCT_MODEL)
+    assert asyncio.run(manager.get_device_credentials("AA:BB:CC:DD:EE:FF")) is not None
+    manager.login.assert_not_awaited()
+
+    manager.data.pop(CONF_LOCAL_KEY)
+    assert asyncio.run(manager.get_device_credentials("AA:BB:CC:DD:EE:FF")) is None
+    manager.login.assert_not_awaited()
 
 
 def test_setup_retries_when_ble_device_is_missing():

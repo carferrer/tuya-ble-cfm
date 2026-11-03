@@ -76,3 +76,32 @@ def refresh_dp71_unlock(command: bytes, timestamp: int) -> bytes:
     if not 0 < timestamp < 2**32:
         raise LA_T01UnlockDataError("La fecha actual no cabe en DP71")
     return command[:13] + timestamp.to_bytes(4, "big") + command[17:]
+
+
+def dp71_seed_from_command(command: bytes) -> str:
+    """Keep only the lock ID, mobile verification value, and member ID."""
+    refresh_dp71_unlock(command, 1)
+    return (command[2:12] + command[18:19]).hex()
+
+
+def dp71_command_from_seed(seed: str, timestamp: int) -> bytes:
+    """Restore a DP71 command after restarting Home Assistant."""
+    if not 0 < timestamp < 2**32:
+        raise LA_T01UnlockDataError("La fecha actual no cabe en DP71")
+    if not isinstance(seed, str):
+        raise LA_T01UnlockDataError("La preparación DP71 local no es válida")
+    try:
+        raw = bytes.fromhex(seed)
+    except ValueError as err:
+        raise LA_T01UnlockDataError("La preparación DP71 local no es válida") from err
+    if len(raw) != 11:
+        raise LA_T01UnlockDataError("La preparación DP71 local no es válida")
+    command = (
+        b"\xff\xff"
+        + raw[:10]
+        + b"\x01"
+        + timestamp.to_bytes(4, "big")
+        + b"\x00"
+        + raw[10:]
+    )
+    return refresh_dp71_unlock(command, timestamp)

@@ -18,6 +18,8 @@ spec.loader.exec_module(module)
 LA_T01UnlockDataError = module.LA_T01UnlockDataError
 build_dp71_unlock = module.build_dp71_unlock
 refresh_dp71_unlock = module.refresh_dp71_unlock
+dp71_seed_from_command = module.dp71_seed_from_command
+dp71_command_from_seed = module.dp71_command_from_seed
 
 
 def properties(*, member=1, result=0, pairing_time=10, report_time=20):
@@ -89,3 +91,19 @@ def test_cached_dp71_reuses_only_identity_and_verification_with_fresh_time():
 def test_cached_dp71_rejects_missing_or_malformed_seed(command):
     with pytest.raises(LA_T01UnlockDataError, match="local válida"):
         refresh_dp71_unlock(command, 1800000030)
+
+
+def test_dp71_minimal_seed_restores_command_after_restart():
+    original = build_dp71_unlock(properties(), 1800000000)
+    seed = dp71_seed_from_command(original)
+    assert len(bytes.fromhex(seed)) == 11
+    restored = dp71_command_from_seed(seed, 1800000090)
+    assert restored[:13] == original[:13]
+    assert restored[13:17] == (1800000090).to_bytes(4, "big")
+    assert restored[17:] == original[17:]
+
+
+@pytest.mark.parametrize("seed", (None, "not-hex", "aa", "00" * 11))
+def test_dp71_rejects_invalid_persisted_seed(seed):
+    with pytest.raises(LA_T01UnlockDataError):
+        dp71_command_from_seed(seed, 1800000090)

@@ -105,6 +105,7 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         self._device._cfm_dp71_response_history = []
         self._device._cfm_dp71_previous_verification = None
         self._device._cfm_dp71_local_command = None
+        self._device._cfm_dp71_local_persisted = False
         device.register_connected_callback(self._async_handle_connect)
         device.register_callback(self._async_handle_update)
         device.register_disconnected_callback(self._async_handle_disconnect)
@@ -173,7 +174,11 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
                     continue
                 if datapoint.id == 70:
                     # A new pairing can invalidate the mobile verification value.
-                    self._device._cfm_dp71_local_command = None
+                    session = getattr(self._device, "_cfm_dp71_session", None)
+                    if session is not None:
+                        session.invalidate()
+                    else:
+                        self._device._cfm_dp71_local_command = None
                 if datapoint.id == 71 and len(value) == 19:
                     verification = value[4:12]
                     previous = self._device._cfm_dp71_previous_verification
@@ -191,7 +196,11 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
                     del self._device._cfm_dp71_response_history[:-20]
                     self._device._cfm_dp71_previous_verification = verification
                     if value[18] != 0:
-                        self._device._cfm_dp71_local_command = None
+                        session = getattr(self._device, "_cfm_dp71_session", None)
+                        if session is not None:
+                            session.invalidate()
+                        else:
+                            self._device._cfm_dp71_local_command = None
         received_event = {
             "received_at": time.time(),
             "gatt_connected": self._device.connected,
