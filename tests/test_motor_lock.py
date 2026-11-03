@@ -1,4 +1,4 @@
-"""Check motor-state mapping and that both lock actions use the tested DP6 path."""
+"""Check motor-state mapping and each product's tested local unlock path."""
 
 from __future__ import annotations
 
@@ -37,6 +37,9 @@ def _lock(product="b3aouluh"):
     async def send_unlock(device):
         commands.append(device)
 
+    async def send_dp71_unlock(device):
+        commands.append(("dp71", device))
+
     namespace = {
         "FakeBase": FakeBase,
         "callback": lambda func: func,
@@ -44,6 +47,7 @@ def _lock(product="b3aouluh"):
         "TuyaBLEDataPointType": SimpleNamespace(DT_BOOL="bool"),
         "DP_MOTOR_STATE": 47,
         "async_press_bluetooth_unlock": send_unlock,
+        "async_press_dp71_local_unlock": send_dp71_unlock,
     }
     setup = next(
         node for node in source.body
@@ -54,6 +58,7 @@ def _lock(product="b3aouluh"):
         PRODUCT_B3AOULUH="b3aouluh",
         PRODUCT_OKKYFGFS="okkyfgfs",
         PRODUCT_7A4XVBTT="7a4xvbtt",
+        PRODUCT_8GZA4O8A="8gza4o8a",
     )
     module = ast.fix_missing_locations(ast.Module(body=[cls, setup], type_ignores=[]))
     exec(
@@ -72,14 +77,14 @@ def _lock(product="b3aouluh"):
     asyncio.run(namespace["async_setup_entry"](
         hass, SimpleNamespace(entry_id="entry"), entities.extend
     ))
-    if product in ("b3aouluh", "okkyfgfs", "7a4xvbtt"):
+    if product in ("b3aouluh", "okkyfgfs", "7a4xvbtt", "8gza4o8a"):
         assert len(entities) == 1
     else:
         assert not entities
     return entities[0] if entities else None, device, dp_cache, commands
 
 
-@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt"])
+@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt", "8gza4o8a"])
 def test_motor_reports_set_lock_state_without_command_guessing(product):
     entity, device, cache, commands = _lock(product)
     assert entity.domain == "lock"
@@ -93,11 +98,11 @@ def test_motor_reports_set_lock_state_without_command_guessing(product):
     assert entity._attr_is_locked is False
     asyncio.run(entity.async_lock())
     asyncio.run(entity.async_unlock())
-    assert commands == [device, device]
+    assert commands == ([("dp71", device)] * 2 if product == "8gza4o8a" else [device, device])
     assert entity._attr_is_locked is False
 
 
-@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt"])
+@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt", "8gza4o8a"])
 def test_initial_state_uses_cached_motor_report_only(product):
     entity, _, cache, _ = _lock(product)
     cache[47] = SimpleNamespace(id=47, type="bool", value=False)
@@ -105,7 +110,7 @@ def test_initial_state_uses_cached_motor_report_only(product):
     assert entity._attr_is_locked is True
 
 
-@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt"])
+@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt", "8gza4o8a"])
 def test_restored_state_wins_over_provisional_transport_cache(product):
     entity, device, cache, _ = _lock(product)
     cache[47] = SimpleNamespace(id=47, type="bool", value=True)

@@ -50,7 +50,7 @@ def test_platform_modules_import_with_home_assistant(module):
         ("b3aouluh", True, True),
         ("okkyfgfs", True, False),
         ("7a4xvbtt", True, True),
-        ("8gza4o8a", False, True),
+        ("8gza4o8a", True, True),
         ("unsupported", False, False),
     ),
 )
@@ -92,6 +92,7 @@ def test_la_t01_exposes_refresh_and_dp71_without_dp6():
         Platform.BINARY_SENSOR,
         Platform.SELECT,
         Platform.EVENT,
+        Platform.LOCK,
         Platform.SWITCH,
     ]
     assert button.get_mapping_by_device(device) == []
