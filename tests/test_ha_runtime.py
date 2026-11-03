@@ -108,6 +108,7 @@ def test_la_t01_volume_connects_before_ble_write():
         return datapoint
 
     device = SimpleNamespace(
+        category="jtmspro",
         product_id="8gza4o8a",
         connected=False,
         datapoints=SimpleNamespace(get_or_create=MagicMock(side_effect=get_or_create)),
