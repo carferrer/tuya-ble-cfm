@@ -62,13 +62,15 @@ def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
             Platform.SWITCH,
         ]
     if device.product_id == PRODUCT_8GZA4O8A:
-        # Keep DP6 and lock/switch controls absent; only expose the DP31 selector.
+        # DP6 and the lock entity remain absent. DP31 and experimental DP33
+        # controls are available only for this product.
         return [
             Platform.BUTTON,
             Platform.SENSOR,
             Platform.BINARY_SENSOR,
             Platform.SELECT,
             Platform.EVENT,
+            Platform.SWITCH,
         ]
     return [
         platform

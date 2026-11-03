@@ -60,8 +60,20 @@ class FakeDP:
 
 
 class FakeDatapoints(dict):
+    def __init__(self, device):
+        super().__init__()
+        self.device = device
+
+    def __getitem__(self, dp_id):
+        return self.get(dp_id)
+
     def has_id(self, dp_id, dp_type):
         return dp_id in self and self[dp_id].type == dp_type
+
+    def get_or_create(self, dp_id, dp_type, value):
+        if dp_id not in self:
+            self[dp_id] = FakeDP(self.device, value, dp_type)
+        return self[dp_id]
 
 
 class FakeDevice:
@@ -69,7 +81,7 @@ class FakeDevice:
         self.product_id = product
         self.device_id = "test-lock"
         self.address = "test-address"
-        self.datapoints = FakeDatapoints()
+        self.datapoints = FakeDatapoints(self)
         self.datapoints[33] = FakeDP(self, initial)
         self.callbacks = []
         self.connected = True
@@ -78,6 +90,9 @@ class FakeDevice:
     async def reconnect(self):
         self.reconnect_calls += 1
         self.connected = True
+
+    async def reconnect_and_update(self):
+        await self.reconnect()
 
     def register_callback(self, callback):
         self.callbacks.append(callback)
@@ -118,6 +133,7 @@ def code():
         "callback": lambda fn: fn, "DOMAIN": "tuya_ble",
         "PRODUCT_B3AOULUH": "b3aouluh",
         "PRODUCT_7A4XVBTT": "7a4xvbtt",
+        "PRODUCT_8GZA4O8A": "8gza4o8a",
         "PASSAGE_CONNECT_SETTLE_SECONDS": 0.5,
         "_LOGGER": SimpleNamespace(warning=lambda *a: None),
         "er": SimpleNamespace(
@@ -179,8 +195,9 @@ def test_command_waits_for_device_confirmation_and_can_reverse(code):
     assert switch._confirmation is None
 
 
-def test_7a4xvbtt_inverts_report_restore_and_command(code):
-    device = FakeDevice(product="7a4xvbtt", initial=True)
+@pytest.mark.parametrize("product", ("7a4xvbtt", "8gza4o8a"))
+def test_automatic_lock_products_invert_report_restore_and_command(code, product):
+    device = FakeDevice(product=product, initial=True)
     device._cfm_lock_state = SimpleNamespace(get=lambda dp_id: True)
     switch = make_switch(code, device)
     assert switch.available is True
@@ -200,8 +217,9 @@ def test_7a4xvbtt_inverts_report_restore_and_command(code):
     assert code.settle_delays == []
 
 
-def test_7a4xvbtt_waits_after_reconnect_before_passage_write(code):
-    device = FakeDevice(product="7a4xvbtt", initial=True)
+@pytest.mark.parametrize("product", ("7a4xvbtt", "8gza4o8a"))
+def test_automatic_lock_products_wait_after_reconnect_before_passage_write(code, product):
+    device = FakeDevice(product=product, initial=True)
     switch = make_switch(code, device)
     device.connected = False
 
@@ -217,8 +235,9 @@ def test_7a4xvbtt_waits_after_reconnect_before_passage_write(code):
     assert switch._attr_is_on is True
 
 
-def test_7a4xvbtt_refuses_passage_write_without_pairing(code):
-    device = FakeDevice(product="7a4xvbtt", initial=True)
+@pytest.mark.parametrize("product", ("7a4xvbtt", "8gza4o8a"))
+def test_automatic_lock_products_refuse_passage_write_without_pairing(code, product):
+    device = FakeDevice(product=product, initial=True)
     switch = make_switch(code, device)
     device.connected = False
 
@@ -232,11 +251,41 @@ def test_7a4xvbtt_refuses_passage_write_without_pairing(code):
     assert code.settle_delays == []
 
 
-def test_7a4xvbtt_unknown_saved_state_is_not_inverted_to_on(code):
-    device = FakeDevice(product="7a4xvbtt")
+@pytest.mark.parametrize("product", ("7a4xvbtt", "8gza4o8a"))
+def test_automatic_lock_products_do_not_invert_unknown_saved_state(code, product):
+    device = FakeDevice(product=product)
     device._cfm_lock_state = SimpleNamespace(get=lambda dp_id: None)
     switch = make_switch(code, device)
     assert switch._attr_is_on is None
+
+
+def test_la_t01_can_write_dp33_before_its_first_ble_report(code):
+    device = FakeDevice(product="8gza4o8a")
+    device.datapoints.pop(33)
+    device.connected = False
+    switch = make_switch(code, device)
+    assert switch.available is True
+    assert switch._attr_is_on is None
+
+    created = []
+    original_create = device.datapoints.get_or_create
+
+    async def report(value):
+        device.report(value)
+
+    def create(dp_id, dp_type, value):
+        created.append((dp_id, dp_type, value))
+        dp = original_create(dp_id, dp_type, value)
+        dp.on_send = report
+        return dp
+
+    device.datapoints.get_or_create = create
+    asyncio.run(switch.async_turn_on())
+    assert created == [(33, DPType.DT_BOOL, False)]
+    assert device.reconnect_calls == 1
+    assert code.settle_delays == [0.5]
+    assert device.datapoints[33].sent == [False]
+    assert switch._attr_is_on is True
 
 
 def test_unconfirmed_command_fails_without_optimistic_state(code):
@@ -268,7 +317,7 @@ def test_wrong_product_or_wrong_dp_type_never_writes(code):
 
 
 def test_setup_only_adds_control_for_supported_dp33_products(code):
-    for product, expected in [("b3aouluh", 1), ("7a4xvbtt", 1), ("okkyfgfs", 0)]:
+    for product, expected in [("b3aouluh", 1), ("7a4xvbtt", 1), ("8gza4o8a", 1), ("okkyfgfs", 0)]:
         device = FakeDevice(product=product)
         data = SimpleNamespace(device=device, product=None, coordinator=None)
         hass = SimpleNamespace(data={"tuya_ble": {"entry": data}})
@@ -332,7 +381,7 @@ def test_lock_and_passage_switch_platforms_load_for_supported_families():
     ]
     assert select(SimpleNamespace(product_id="8gza4o8a")) == [
         Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.SELECT,
-        Platform.EVENT,
+        Platform.EVENT, Platform.SWITCH,
     ]
     assert select(SimpleNamespace(product_id="unsupported")) == [
         Platform.BUTTON, Platform.SENSOR
