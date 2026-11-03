@@ -155,7 +155,7 @@ class TuyaBLEDP71TestButton(TuyaBLEEntity, ButtonEntity):
             data.device,
             data.product,
             ButtonEntityDescription(
-                key="bluetooth_unlock_dp71_test", name="Prueba abrir DP71"
+                key="bluetooth_unlock_dp71_test", name="Preparar y abrir (Tuya Cloud)"
             ),
             "button",
         )
@@ -222,7 +222,7 @@ class TuyaBLEDP71LocalTestButton(TuyaBLEEntity, ButtonEntity):
             data.product,
             ButtonEntityDescription(
                 key="bluetooth_unlock_dp71_local_test",
-                name="Prueba abrir DP71 local",
+                name="Abrir (Bluetooth local)",
             ),
             "button",
         )
