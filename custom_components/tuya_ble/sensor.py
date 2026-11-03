@@ -33,6 +33,7 @@ from .connection_policy import CONNECTION_MODE_PERIODIC_SYNC, connection_mode, s
 from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
+    PRODUCT_8GZA4O8A,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
@@ -98,6 +99,10 @@ mapping = {
         ]
     },
     "jtmspro": {
+        PRODUCT_8GZA4O8A: [
+            alarm_mapping(),
+            TuyaBLEBatteryMapping(dp_id=8),
+        ],
         "b3aouluh": [
             alarm_mapping(),
             TuyaBLESensorMapping(
@@ -414,6 +419,11 @@ async def async_setup_entry(
                         hass, data.coordinator, data.device, data.product, item
                     )
                 )
-    if data.device.product_id in (PRODUCT_B3AOULUH, PRODUCT_OKKYFGFS, PRODUCT_7A4XVBTT):
+    if data.device.product_id in (
+        PRODUCT_B3AOULUH,
+        PRODUCT_OKKYFGFS,
+        PRODUCT_7A4XVBTT,
+        PRODUCT_8GZA4O8A,
+    ):
         entities.append(TuyaBLELastAccessSensor(hass, entry, data.device))
     async_add_entities(entities)

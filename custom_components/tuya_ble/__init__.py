@@ -23,6 +23,7 @@ from .cloud import HASSTuyaBLEDeviceManager
 from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
+    PRODUCT_8GZA4O8A,
     TuyaBLECoordinator,
     TuyaBLEData,
     get_device_product_info,
@@ -59,6 +60,10 @@ def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
             Platform.LOCK,
             Platform.SWITCH,
         ]
+    if device.product_id == PRODUCT_8GZA4O8A:
+        # DP70/71 use a verification exchange that has not been tested here.
+        # Expose reports only; do not load any platform with write controls.
+        return [Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT]
     return [
         platform
         for platform in PLATFORMS

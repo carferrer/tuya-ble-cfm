@@ -316,6 +316,7 @@ def test_lock_and_passage_switch_platforms_load_for_supported_families():
         "PRODUCT_B3AOULUH": "b3aouluh",
         "PRODUCT_OKKYFGFS": "okkyfgfs",
         "PRODUCT_7A4XVBTT": "7a4xvbtt",
+        "PRODUCT_8GZA4O8A": "8gza4o8a",
     }
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "__init__.py", "exec",
                  flags=__import__("__future__").annotations.compiler_flag), ns)
@@ -327,6 +328,9 @@ def test_lock_and_passage_switch_platforms_load_for_supported_families():
     assert select(SimpleNamespace(product_id="7a4xvbtt")) == [
         Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT,
         Platform.LOCK, Platform.SWITCH,
+    ]
+    assert select(SimpleNamespace(product_id="8gza4o8a")) == [
+        Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT,
     ]
     assert select(SimpleNamespace(product_id="unsupported")) == [
         Platform.BUTTON, Platform.SENSOR

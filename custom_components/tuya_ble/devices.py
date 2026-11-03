@@ -28,6 +28,7 @@ _LOGGER = logging.getLogger(__name__)
 PRODUCT_B3AOULUH = "b3aouluh"
 PRODUCT_OKKYFGFS = "okkyfgfs"
 PRODUCT_7A4XVBTT = "7a4xvbtt"
+PRODUCT_8GZA4O8A = "8gza4o8a"
 DP_GET_RECORDS = 69
 DP_GET_RECORDS_REQUEST_ACTION = 0x01
 MOBILE_CENTRAL_ID = b"\xff\xff"
@@ -262,6 +263,7 @@ devices_database: dict[str, TuyaBLECategoryInfo] = {
     "jtmspro": TuyaBLECategoryInfo(
         products={
             "b3aouluh": TuyaBLEProductInfo(name="Smart Lock"),
+            PRODUCT_8GZA4O8A: TuyaBLEProductInfo(name="LA-T01"),
         },
     ),
 }

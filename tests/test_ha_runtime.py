@@ -39,6 +39,7 @@ def test_platform_modules_import_with_home_assistant(module):
         ("b3aouluh", True, True),
         ("okkyfgfs", True, False),
         ("7a4xvbtt", True, True),
+        ("8gza4o8a", False, False),
         ("unsupported", False, False),
     ),
 )
@@ -67,6 +68,34 @@ def test_7a4xvbtt_exposes_reports_and_tested_dp6_controls():
     assert select.get_mapping_by_device(device) == []
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
+
+
+def test_la_t01_advertisement_is_selectable_and_entities_are_read_only():
+    """The observed A201 advertisement must reach the manual device selector."""
+    from custom_components.tuya_ble.tuya_ble import SERVICE_UUID_TEMP
+
+    discovery = SimpleNamespace(
+        service_data={SERVICE_UUID_TEMP: bytes.fromhex("0089bb8240ece0e544")}
+    )
+    device = SimpleNamespace(category="jtmspro", product_id="8gza4o8a")
+
+    assert config_flow._has_tuya_service(discovery)
+    assert get_product_info_by_ids(device.category, device.product_id) is not None
+    assert _platforms_for_device(device) == [
+        Platform.SENSOR,
+        Platform.BINARY_SENSOR,
+        Platform.EVENT,
+    ]
+    assert button.get_mapping_by_device(device) == []
+    assert select.get_mapping_by_device(device) == []
+    assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
+    assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
+
+
+def test_manual_selector_rejects_non_tuya_advertisements():
+    discovery = SimpleNamespace(service_data={"other": b"data"})
+    assert not config_flow._has_tuya_service(discovery)
+    assert not config_flow._has_tuya_service(SimpleNamespace(service_data=None))
 
 
 def test_setup_retries_when_ble_device_is_missing():

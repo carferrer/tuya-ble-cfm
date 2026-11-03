@@ -29,6 +29,7 @@ from .connection_policy import setup_connection_policy
 from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
+    PRODUCT_8GZA4O8A,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
@@ -240,6 +241,7 @@ async def async_setup_entry(
         PRODUCT_B3AOULUH,
         PRODUCT_OKKYFGFS,
         PRODUCT_7A4XVBTT,
+        PRODUCT_8GZA4O8A,
     ):
         return
 
