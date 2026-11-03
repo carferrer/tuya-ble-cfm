@@ -12,6 +12,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
+from .button import async_press_dp71_local_unlock, build_local_dp71_command
 from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
@@ -26,6 +27,7 @@ _LOGGER = logging.getLogger(__name__)
 DP_PASSAGE_MODE_CANDIDATE = 33
 CONFIRM_TIMEOUT_SECONDS = 15
 PASSAGE_CONNECT_SETTLE_SECONDS = 0.5
+PASSAGE_LA_UNLOCK_DELAY_SECONDS = 0.5
 INVERTED_PASSAGE_PRODUCTS = (PRODUCT_7A4XVBTT, PRODUCT_8GZA4O8A)
 PASSAGE_PRODUCTS = (PRODUCT_B3AOULUH, *INVERTED_PASSAGE_PRODUCTS)
 
@@ -113,6 +115,9 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
     async def _set_mode(self, desired: bool) -> None:
         if self._device.product_id not in PASSAGE_PRODUCTS:
             raise HomeAssistantError("Passage-mode control is unavailable for this lock")
+        if self._device.product_id == PRODUCT_8GZA4O8A:
+            # Avoid changing DP33 if the required local opening is not ready.
+            build_local_dp71_command(self._device)
         dp33_desired = (
             not desired if self._device.product_id in INVERTED_PASSAGE_PRODUCTS else desired
         )
@@ -155,6 +160,9 @@ class TuyaBLEPassageModeSwitch(TuyaBLEEntity, SwitchEntity):
                 # set_value changes the transport cache before writing. The
                 # callback above accepts only a subsequent device report.
                 await dp.set_value(dp33_desired)
+                if self._device.product_id == PRODUCT_8GZA4O8A:
+                    await asyncio.sleep(PASSAGE_LA_UNLOCK_DELAY_SECONDS)
+                    await async_press_dp71_local_unlock(self._device)
                 await asyncio.wait_for(confirmation, CONFIRM_TIMEOUT_SECONDS)
             except TimeoutError as err:
                 _LOGGER.warning(

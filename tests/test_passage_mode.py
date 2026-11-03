@@ -86,6 +86,8 @@ class FakeDevice:
         self.callbacks = []
         self.connected = True
         self.reconnect_calls = 0
+        self.local_ready = True
+        self.local_unlocks = []
 
     async def reconnect(self):
         self.reconnect_calls += 1
@@ -117,6 +119,13 @@ def code():
     async def sleep(seconds):
         delays.append(seconds)
 
+    def preflight(device):
+        if not device.local_ready:
+            raise HAError("Primero pulsa Preparar y abrir")
+
+    async def local_unlock(device):
+        device.local_unlocks.append(device.datapoints[33].sent[-1])
+
     ns = {
         "__name__": "passage_test",
         "asyncio": SimpleNamespace(
@@ -135,6 +144,9 @@ def code():
         "PRODUCT_7A4XVBTT": "7a4xvbtt",
         "PRODUCT_8GZA4O8A": "8gza4o8a",
         "PASSAGE_CONNECT_SETTLE_SECONDS": 0.5,
+        "PASSAGE_LA_UNLOCK_DELAY_SECONDS": 0.5,
+        "build_local_dp71_command": preflight,
+        "async_press_dp71_local_unlock": local_unlock,
         "_LOGGER": SimpleNamespace(warning=lambda *a: None),
         "er": SimpleNamespace(
             async_get=lambda hass: SimpleNamespace(async_get_entity_id=lambda *args: None),
@@ -214,7 +226,8 @@ def test_automatic_lock_products_invert_report_restore_and_command(code, product
     assert switch._attr_is_on is False
     assert device.datapoints[33].sent == [False, True]
     assert device.reconnect_calls == 0
-    assert code.settle_delays == []
+    assert code.settle_delays == ([0.5, 0.5] if product == "8gza4o8a" else [])
+    assert device.local_unlocks == ([False, True] if product == "8gza4o8a" else [])
 
 
 @pytest.mark.parametrize("product", ("7a4xvbtt", "8gza4o8a"))
@@ -233,6 +246,8 @@ def test_automatic_lock_products_wait_after_reconnect_before_passage_write(code,
     asyncio.run(switch.async_turn_on())
     assert device.datapoints[33].sent == [False]
     assert switch._attr_is_on is True
+    assert device.local_unlocks == ([False] if product == "8gza4o8a" else [])
+    assert code.settle_delays == ([0.5, 0.5] if product == "8gza4o8a" else [0.5])
 
 
 @pytest.mark.parametrize("product", ("7a4xvbtt", "8gza4o8a"))
@@ -283,9 +298,20 @@ def test_la_t01_can_write_dp33_before_its_first_ble_report(code):
     asyncio.run(switch.async_turn_on())
     assert created == [(33, DPType.DT_BOOL, False)]
     assert device.reconnect_calls == 1
-    assert code.settle_delays == [0.5]
+    assert code.settle_delays == [0.5, 0.5]
     assert device.datapoints[33].sent == [False]
     assert switch._attr_is_on is True
+    assert device.local_unlocks == [False]
+
+
+def test_la_t01_needs_local_unlock_ready_before_changing_dp33(code):
+    device = FakeDevice(product="8gza4o8a", initial=True)
+    device.local_ready = False
+    switch = make_switch(code, device)
+    with pytest.raises(HAError, match="Preparar y abrir"):
+        asyncio.run(switch.async_turn_on())
+    assert device.datapoints[33].sent == []
+    assert device.local_unlocks == []
 
 
 def test_unconfirmed_command_fails_without_optimistic_state(code):

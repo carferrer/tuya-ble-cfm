@@ -211,6 +211,41 @@ class TuyaBLEDP71TestButton(TuyaBLEEntity, ButtonEntity):
                 raise
 
 
+def build_local_dp71_command(device: TuyaBLEDevice) -> bytes:
+    """Check the saved LA-T01 seed and build a fresh local unlock command."""
+    if device.product_id != PRODUCT_8GZA4O8A:
+        raise HomeAssistantError("DP71 local solo está disponible para LA-T01")
+    cached = getattr(device, "_cfm_dp71_local_command", None)
+    if cached is None:
+        raise HomeAssistantError(
+            "Primero pulsa «Preparar y abrir (Tuya Cloud)» con Internet"
+        )
+    try:
+        return refresh_dp71_unlock(cached, int(time.time()))
+    except ValueError as err:
+        raise HomeAssistantError(str(err)) from err
+
+
+async def async_press_dp71_local_unlock(device: TuyaBLEDevice) -> None:
+    """Send the same offline DP71 command used by the LA-T01 button."""
+    command_lock = getattr(device, "_cfm_unlock_command_lock", None)
+    if command_lock is None:
+        command_lock = device._cfm_unlock_command_lock = asyncio.Lock()
+    async with command_lock:
+        command = build_local_dp71_command(device)
+        datapoint = device.datapoints.get_or_create(
+            71, TuyaBLEDataPointType.DT_RAW, b""
+        )
+        if datapoint.type != TuyaBLEDataPointType.DT_RAW:
+            raise HomeAssistantError("Se esperaba DP71 de tipo raw")
+        if not device.connected:
+            await device.reconnect()
+            if not device.connected:
+                raise HomeAssistantError("La cerradura no estableció una conexión BLE")
+            await asyncio.sleep(UNLOCK_CONNECT_SETTLE_SECONDS)
+        await datapoint.set_value(command)
+
+
 class TuyaBLEDP71LocalTestButton(TuyaBLEEntity, ButtonEntity):
     """Try a local LA-T01 unlock using the last cloud-derived DP71 command."""
 
@@ -233,33 +268,7 @@ class TuyaBLEDP71LocalTestButton(TuyaBLEEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Send one DP71 command over BLE without querying Tuya Cloud."""
-        if self._device.product_id != PRODUCT_8GZA4O8A:
-            raise HomeAssistantError("DP71 local solo está disponible para LA-T01")
-
-        command_lock = getattr(self._device, "_cfm_unlock_command_lock", None)
-        if command_lock is None:
-            command_lock = self._device._cfm_unlock_command_lock = asyncio.Lock()
-        async with command_lock:
-            cached = getattr(self._device, "_cfm_dp71_local_command", None)
-            if cached is None:
-                raise HomeAssistantError(
-                    "Primero pulsa «Preparar y abrir (Tuya Cloud)» con Internet"
-                )
-            try:
-                command = refresh_dp71_unlock(cached, int(time.time()))
-            except ValueError as err:
-                raise HomeAssistantError(str(err)) from err
-            datapoint = self._device.datapoints.get_or_create(
-                71, TuyaBLEDataPointType.DT_RAW, b""
-            )
-            if datapoint.type != TuyaBLEDataPointType.DT_RAW:
-                raise HomeAssistantError("Se esperaba DP71 de tipo raw")
-            if not self._device.connected:
-                await self._device.reconnect()
-                if not self._device.connected:
-                    raise HomeAssistantError("La cerradura no estableció una conexión BLE")
-                await asyncio.sleep(UNLOCK_CONNECT_SETTLE_SECONDS)
-            await datapoint.set_value(command)
+        await async_press_dp71_local_unlock(self._device)
 
 
 async def async_setup_entry(

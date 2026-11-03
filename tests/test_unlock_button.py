@@ -166,6 +166,14 @@ def test_la_t01_dp71_button_fetches_cloud_report_and_sends_once():
 
 def test_la_t01_local_button_requires_seed_then_uses_ble_without_cloud():
     source = ast.parse(BUTTON.read_text(encoding="utf-8"))
+    build_command = next(
+        node for node in source.body
+        if isinstance(node, ast.FunctionDef) and node.name == "build_local_dp71_command"
+    )
+    send_command = next(
+        node for node in source.body
+        if isinstance(node, ast.AsyncFunctionDef) and node.name == "async_press_dp71_local_unlock"
+    )
     cls = next(
         node for node in source.body
         if isinstance(node, ast.ClassDef) and node.name == "TuyaBLEDP71LocalTestButton"
@@ -202,7 +210,7 @@ def test_la_t01_local_button_requires_seed_then_uses_ble_without_cloud():
         "time": SimpleNamespace(time=lambda: 1800000030),
         "refresh_dp71_unlock": lambda command, timestamp: b"fresh-local-command",
     }
-    module = ast.fix_missing_locations(ast.Module(body=[cls], type_ignores=[]))
+    module = ast.fix_missing_locations(ast.Module(body=[build_command, send_command, cls], type_ignores=[]))
     exec(
         compile(module, str(BUTTON), "exec", flags=__import__("__future__").annotations.compiler_flag),
         namespace,

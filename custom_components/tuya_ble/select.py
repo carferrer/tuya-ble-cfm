@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from homeassistant.components.select import SelectEntity, SelectEntityDescription
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -20,7 +20,10 @@ from .devices import (
     TuyaBLEEntity,
     TuyaBLEProductInfo,
 )
-from .tuya_ble import TuyaBLEDataPointType, TuyaBLEDevice
+from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
+
+
+VOLUME_CONFIRM_TIMEOUT_SECONDS = 8
 
 
 @dataclass
@@ -93,30 +96,87 @@ class TuyaBLESelect(TuyaBLEEntity, SelectEntity):
 class TuyaBLELASelect(TuyaBLESelect):
     """Set LA-T01 volume over BLE, connecting first when it is asleep."""
 
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        coordinator: DataUpdateCoordinator,
+        device: TuyaBLEDevice,
+        product: TuyaBLEProductInfo,
+        mapping: TuyaBLESelectMapping,
+    ) -> None:
+        super().__init__(hass, coordinator, device, product, mapping)
+        self._confirmed_option: str | None = None
+        self._command_lock = asyncio.Lock()
+        self._confirmation: asyncio.Future[bool] | None = None
+        self._desired_value: int | None = None
+
     @property
     def available(self) -> bool:
         return True
 
+    @property
+    def current_option(self) -> str | None:
+        """Show only a DP31 value reported by the lock, not our send cache."""
+        return self._confirmed_option
+
+    @callback
+    def _handle_volume_updates(self, updates: list[TuyaBLEDataPoint]) -> None:
+        for dp in updates:
+            if (
+                dp.id != self._mapping.dp_id
+                or dp.type != TuyaBLEDataPointType.DT_ENUM
+                or type(dp.value) is not int
+                or not 0 <= dp.value < len(self._attr_options)
+            ):
+                continue
+            self._confirmed_option = self._attr_options[dp.value]
+            self.async_write_ha_state()
+            if (
+                self._confirmation is not None
+                and not self._confirmation.done()
+                and dp.value == self._desired_value
+            ):
+                self._confirmation.set_result(True)
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._device.register_callback(self._handle_volume_updates))
+
     async def async_select_option(self, option: str) -> None:
         if option not in self._attr_options:
             raise HomeAssistantError(f"Unsupported lock volume: {option}")
-        if not self._device.connected:
-            await self._device.reconnect()
+        async with self._command_lock:
             if not self._device.connected:
-                raise HomeAssistantError("La cerradura no estableció una conexión BLE")
-            await asyncio.sleep(0.5)
-        datapoint = self._device.datapoints.get_or_create(
-            self._mapping.dp_id,
-            TuyaBLEDataPointType.DT_ENUM,
-            self._attr_options.index(option),
-        )
-        if datapoint.type != TuyaBLEDataPointType.DT_ENUM:
-            raise HomeAssistantError("Se esperaba DP31 de tipo enum")
-        await datapoint.set_value(self._attr_options.index(option))
-        self.async_write_ha_state()
-        touch = getattr(self._device, "_lock_power_saver_touch", None)
-        if touch is not None:
-            touch(5.0)
+                await self._device.reconnect()
+                if not self._device.connected:
+                    raise HomeAssistantError("La cerradura no estableció una conexión BLE")
+                await asyncio.sleep(0.5)
+            value = self._attr_options.index(option)
+            datapoint = self._device.datapoints.get_or_create(
+                self._mapping.dp_id, TuyaBLEDataPointType.DT_ENUM, value
+            )
+            if datapoint.type != TuyaBLEDataPointType.DT_ENUM:
+                raise HomeAssistantError("Se esperaba DP31 de tipo enum")
+            confirmation = asyncio.get_running_loop().create_future()
+            self._confirmation = confirmation
+            self._desired_value = value
+            try:
+                await datapoint.set_value(value)
+                touch = getattr(self._device, "_lock_power_saver_touch", None)
+                if touch is not None:
+                    touch(10.0)
+                if not confirmation.done():
+                    await self._device.update()
+                await asyncio.wait_for(confirmation, VOLUME_CONFIRM_TIMEOUT_SECONDS)
+            except TimeoutError as err:
+                raise HomeAssistantError(
+                    "La cerradura no confirmó DP31; comprueba el volumen físicamente"
+                ) from err
+            finally:
+                if not confirmation.done():
+                    confirmation.cancel()
+                self._confirmation = None
+                self._desired_value = None
 
 
 async def async_setup_entry(

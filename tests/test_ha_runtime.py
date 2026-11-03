@@ -102,7 +102,7 @@ def test_la_t01_exposes_refresh_and_dp71_without_dp6():
 
 def test_la_t01_volume_connects_before_ble_write():
     """Only the LA-T01 volume path wakes a sleeping lock before writing DP31."""
-    datapoint = SimpleNamespace(type=TuyaBLEDataPointType.DT_ENUM, set_value=AsyncMock())
+    datapoint = SimpleNamespace(type=TuyaBLEDataPointType.DT_ENUM)
 
     def get_or_create(*args):
         assert device.connected
@@ -113,6 +113,7 @@ def test_la_t01_volume_connects_before_ble_write():
         product_id="8gza4o8a",
         connected=False,
         datapoints=SimpleNamespace(get_or_create=MagicMock(side_effect=get_or_create)),
+        update=AsyncMock(),
     )
 
     async def reconnect():
@@ -124,8 +125,20 @@ def test_la_t01_volume_connects_before_ble_write():
         _device=device,
         _mapping=select.get_mapping_by_device(device)[0],
         _attr_options=["mute", "low", "normal", "high"],
+        _command_lock=asyncio.Lock(),
+        _confirmation=None,
+        _desired_value=None,
+        _confirmed_option=None,
         async_write_ha_state=MagicMock(),
     )
+
+    async def send(value):
+        select.TuyaBLELASelect._handle_volume_updates(
+            entity,
+            [SimpleNamespace(id=31, type=TuyaBLEDataPointType.DT_ENUM, value=value)],
+        )
+
+    datapoint.set_value = AsyncMock(side_effect=send)
     with patch("custom_components.tuya_ble.select.asyncio.sleep", new_callable=AsyncMock) as settle:
         asyncio.run(select.TuyaBLELASelect.async_select_option(entity, "normal"))
 
@@ -133,8 +146,10 @@ def test_la_t01_volume_connects_before_ble_write():
     settle.assert_awaited_once_with(0.5)
     device.datapoints.get_or_create.assert_called_once_with(31, TuyaBLEDataPointType.DT_ENUM, 2)
     datapoint.set_value.assert_awaited_once_with(2)
+    device.update.assert_not_awaited()
     entity.async_write_ha_state.assert_called_once_with()
-    device._lock_power_saver_touch.assert_called_once_with(5.0)
+    assert entity._confirmed_option == "normal"
+    device._lock_power_saver_touch.assert_called_once_with(10.0)
 
 
 def test_la_t01_volume_never_writes_without_ble_connection():
@@ -143,12 +158,43 @@ def test_la_t01_volume_never_writes_without_ble_connection():
         reconnect=AsyncMock(),
         datapoints=SimpleNamespace(get_or_create=MagicMock()),
     )
-    entity = SimpleNamespace(_device=device, _attr_options=["mute", "low", "normal", "high"])
+    entity = SimpleNamespace(
+        _device=device,
+        _attr_options=["mute", "low", "normal", "high"],
+        _command_lock=asyncio.Lock(),
+    )
 
     with pytest.raises(HomeAssistantError, match="no estableció una conexión BLE"):
         asyncio.run(select.TuyaBLELASelect.async_select_option(entity, "high"))
 
     device.datapoints.get_or_create.assert_not_called()
+
+
+def test_la_t01_volume_does_not_show_unconfirmed_write():
+    datapoint = SimpleNamespace(type=TuyaBLEDataPointType.DT_ENUM, set_value=AsyncMock())
+    device = SimpleNamespace(
+        connected=True,
+        datapoints=SimpleNamespace(get_or_create=MagicMock(return_value=datapoint)),
+        update=AsyncMock(),
+    )
+    entity = SimpleNamespace(
+        _device=device,
+        _mapping=SimpleNamespace(dp_id=31),
+        _attr_options=["mute", "low", "normal", "high"],
+        _command_lock=asyncio.Lock(),
+        _confirmation=None,
+        _desired_value=None,
+        _confirmed_option=None,
+    )
+    with (
+        patch("custom_components.tuya_ble.select.VOLUME_CONFIRM_TIMEOUT_SECONDS", 0.001),
+        pytest.raises(HomeAssistantError, match="no confirmó DP31"),
+    ):
+        asyncio.run(select.TuyaBLELASelect.async_select_option(entity, "mute"))
+
+    datapoint.set_value.assert_awaited_once_with(0)
+    device.update.assert_awaited_once_with()
+    assert entity._confirmed_option is None
 
 
 def test_existing_lock_credentials_load_without_cloud_and_missing_credentials_do_not_login():
