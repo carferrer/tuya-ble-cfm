@@ -369,6 +369,62 @@ class TuyaBLELastConnectedSensor(TuyaBLEEntity, SensorEntity):
         self.async_write_ha_state()
 
 
+def connected_proxy_name(device: TuyaBLEDevice) -> str | None:
+    """Identify the backend that actually connected, not the last advertiser."""
+    if not device.connected:
+        return None
+    backend = getattr(getattr(device, "_client", None), "_backend", None)
+    name = getattr(backend, "_source_name", None)
+    if isinstance(name, str) and name:
+        return name
+    source = getattr(backend, "_source", None)
+    return source if isinstance(source, str) and source else None
+
+
+class TuyaBLELastProxySensor(TuyaBLEEntity, SensorEntity):
+    """Show the proxy used for the latest paired GATT connection."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass,
+            data.coordinator,
+            data.device,
+            data.product,
+            SensorEntityDescription(
+                key="last_bluetooth_proxy",
+                name="Último proxy Bluetooth",
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+        )
+        self._store: Store[dict[str, str]] = Store(
+            hass, 1, f"{DOMAIN}.last_bluetooth_proxy.{entry.entry_id}"
+        )
+
+    @property
+    def available(self) -> bool:
+        """The last successful proxy remains useful after a disconnection."""
+        return True
+
+    @callback
+    def _handle_connection(self) -> None:
+        name = connected_proxy_name(self._device)
+        if name is not None and name != self.native_value:
+            self._attr_native_value = name
+            self._store.async_delay_save(lambda: {"name": name}, 1.0)
+            self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(self._device.register_connected_callback(self._handle_connection))
+        self._handle_connection()
+        if self.native_value is None:
+            stored = await self._store.async_load()
+            name = stored.get("name") if isinstance(stored, dict) else None
+            if self.native_value is None and isinstance(name, str) and name:
+                self._attr_native_value = name
+                self.async_write_ha_state()
+
+
 class TuyaBLESyncIntervalSensor(SensorEntity):
     """Effective configured periodic BLE synchronization interval."""
 
@@ -396,6 +452,7 @@ async def async_setup_entry(
     mappings = get_mapping_by_device(data.device)
     entities: list[SensorEntity] = [
         TuyaBLELastConnectedSensor(hass, data),
+        TuyaBLELastProxySensor(hass, entry, data),
         TuyaBLESyncIntervalSensor(entry, data.device),
         TuyaBLESensor(
             hass,
