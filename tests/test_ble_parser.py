@@ -47,9 +47,10 @@ def device():
         "_parse_timestamp",
         "_parse_datapoints_v3",
         "_handle_command_or_response",
+        "_send_packet_while_connected",
     }
     cls.body = [
-        n for n in cls.body if isinstance(n, ast.FunctionDef) and n.name in methods
+        n for n in cls.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in methods
     ]
     module = ast.Module(
         body=[
@@ -97,6 +98,43 @@ def packets(device, data):
 def send(device, data):
     for part in packets(device, data):
         device._notification_handler(0, bytearray(part))
+
+
+def test_la_volume_diagnostic_tracks_only_dp31_response(device):
+    """Do not capture DP71 replies or their private bytes in volume diagnostics."""
+    device.product_id = "8gza4o8a"
+    device._cfm_dp31_pending_sequences = {}
+    device._cfm_dp31_command_responses = []
+    device._input_expected_responses = {}
+    device._get_seq_num = AsyncMock(side_effect=[5, 6, 7])
+    device._build_packets = lambda seq, *_args: [seq]
+    device._handle_command_or_response = type(device)._handle_command_or_response.__get__(device)
+    code = device.ns["TuyaBLECode"].FUN_SENDER_DPS
+    enum_type = device.ns["TuyaBLEDataPointType"].DT_ENUM.value
+    raw_type = device.ns["TuyaBLEDataPointType"].DT_RAW.value
+
+    async def reply(packets):
+        seq = packets[0]
+        device._handle_command_or_response(
+            100 + seq, seq, code, b"\x02" if seq == 5 else b"private-dp71"
+        )
+
+    device._int_send_packet_while_connected = reply
+    asyncio.run(device._send_packet_while_connected(
+        code, bytes((31, enum_type, 1, 3)), 0, False
+    ))
+    asyncio.run(device._send_packet_while_connected(
+        code, bytes((71, raw_type, 2, 1, 2)), 0, False
+    ))
+    device.product_id = "b3aouluh"
+    asyncio.run(device._send_packet_while_connected(
+        code, bytes((31, enum_type, 1, 3)), 0, False
+    ))
+    assert device._cfm_dp31_pending_sequences == {}
+    assert len(device._cfm_dp31_command_responses) == 1
+    assert device._cfm_dp31_command_responses[0]["requested_value"] == 3
+    assert device._cfm_dp31_command_responses[0]["first_byte"] == 2
+    assert "private-dp71" not in repr(device._cfm_dp31_command_responses)
 
 
 @pytest.mark.parametrize(

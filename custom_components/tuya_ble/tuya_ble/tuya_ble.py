@@ -295,6 +295,8 @@ class TuyaBLEDevice:
         self._input_expected_length = 0
         self._input_expected_responses: dict[int,
                                              asyncio.Future[int] | None] = {}
+        self._cfm_dp31_pending_sequences: dict[int, int] = {}
+        self._cfm_dp31_command_responses: list[dict[str, int | float | str | None]] = []
         # self._input_future: asyncio.Future[int] | None = None
 
         self._datapoints = TuyaBLEDataPoints(self)
@@ -996,6 +998,13 @@ class TuyaBLEDevice:
         result = True
         future: asyncio.Future | None = None
         seq_num = await self._get_seq_num()
+        if (
+            self.product_id == "8gza4o8a"
+            and code == TuyaBLECode.FUN_SENDER_DPS
+            and data[:3] == bytes((31, TuyaBLEDataPointType.DT_ENUM.value, 1))
+            and len(data) == 4
+        ):
+            self._cfm_dp31_pending_sequences[seq_num] = data[3]
         if wait_for_response:
             future = asyncio.Future()
             self._input_expected_responses[seq_num] = future
@@ -1017,18 +1026,32 @@ class TuyaBLEDevice:
             )
         packets: list[bytes] = self._build_packets(
             seq_num, code, data, response_to)
-        await self._int_send_packet_while_connected(packets)
-        if future:
-            try:
-                await asyncio.wait_for(future, RESPONSE_WAIT_TIMEOUT)
-            except asyncio.TimeoutError:
-                _LOGGER.error(
-                    "%s: timeout receiving response, RSSI: %s",
-                    self.address,
-                    self.rssi,
-                )
-                result = False
-            self._input_expected_responses.pop(seq_num, None)
+        try:
+            await self._int_send_packet_while_connected(packets)
+            if future:
+                try:
+                    await asyncio.wait_for(future, RESPONSE_WAIT_TIMEOUT)
+                except asyncio.TimeoutError:
+                    if seq_num in self._cfm_dp31_pending_sequences:
+                        self._cfm_dp31_command_responses.append(
+                            {
+                                "received_at": time.time(),
+                                "requested_value": self._cfm_dp31_pending_sequences[seq_num],
+                                "response_code": "timeout",
+                                "payload_length": 0,
+                                "first_byte": None,
+                            }
+                        )
+                        del self._cfm_dp31_command_responses[:-10]
+                    _LOGGER.error(
+                        "%s: timeout receiving response, RSSI: %s",
+                        self.address,
+                        self.rssi,
+                    )
+                    result = False
+                self._input_expected_responses.pop(seq_num, None)
+        finally:
+            self._cfm_dp31_pending_sequences.pop(seq_num, None)
 
         return result
 
@@ -1344,6 +1367,17 @@ class TuyaBLEDevice:
                 asyncio.create_task(self._send_response(code, data, seq_num))
 
         if response_to != 0:
+            if response_to in getattr(self, "_cfm_dp31_pending_sequences", ()):
+                self._cfm_dp31_command_responses.append(
+                    {
+                        "received_at": time.time(),
+                        "requested_value": self._cfm_dp31_pending_sequences[response_to],
+                        "response_code": code.name,
+                        "payload_length": len(data),
+                        "first_byte": data[0] if data else None,
+                    }
+                )
+                del self._cfm_dp31_command_responses[:-10]
             future = self._input_expected_responses.pop(response_to, None)
             if future:
                 _LOGGER.debug(
