@@ -101,6 +101,8 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
         self._device._cfm_dp69_last_request = None
         self._device._cfm_dp69_last_response = None
         self._device._cfm_dp69_last_error = None
+        self._device._cfm_dp71_last_result = None
+        self._device._cfm_dp6_last_result = None
         device.register_connected_callback(self._async_handle_connect)
         device.register_callback(self._async_handle_update)
         device.register_disconnected_callback(self._async_handle_disconnect)
@@ -162,6 +164,23 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
     @callback
     def _async_handle_update(self, updates: list[TuyaBLEDataPoint]) -> None:
         """Capture and propagate BLE datapoint updates to Home Assistant."""
+        if self._device.product_id == PRODUCT_8GZA4O8A:
+            for datapoint in updates:
+                value = datapoint.value
+                if not isinstance(value, bytes):
+                    continue
+                if datapoint.id == 71 and len(value) == 19:
+                    self._device._cfm_dp71_last_result = {
+                        "received_at": time.time(),
+                        "action": value[12],
+                        "method": value[17],
+                        "result_code": value[18],
+                    }
+                elif datapoint.id == 6 and len(value) == 2:
+                    self._device._cfm_dp6_last_result = {
+                        "received_at": time.time(),
+                        "result_code": value[0],
+                    }
         received_event = {
             "received_at": time.time(),
             "gatt_connected": self._device.connected,
@@ -170,7 +189,10 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
                     "id": datapoint.id,
                     "type": datapoint.type.name,
                     "value": (
-                        datapoint.value.hex()
+                        "<redacted>"
+                        if self._device.product_id == PRODUCT_8GZA4O8A
+                        and datapoint.id in (70, 71)
+                        else datapoint.value.hex()
                         if isinstance(datapoint.value, bytes)
                         else datapoint.value
                     ),

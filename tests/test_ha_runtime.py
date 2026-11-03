@@ -70,8 +70,8 @@ def test_7a4xvbtt_exposes_reports_and_tested_dp6_controls():
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
 
 
-def test_la_t01_exposes_refresh_without_unlock_controls():
-    """Enable status refresh while keeping DP controls unavailable."""
+def test_la_t01_exposes_refresh_and_two_independent_test_buttons():
+    """Keep the experimental unlock controls limited to the LA-T01."""
     device = SimpleNamespace(category="jtmspro", product_id="8gza4o8a")
 
     assert get_product_info_by_ids(device.category, device.product_id) is not None
@@ -81,7 +81,9 @@ def test_la_t01_exposes_refresh_without_unlock_controls():
         Platform.BINARY_SENSOR,
         Platform.EVENT,
     ]
-    assert button.get_mapping_by_device(device) == []
+    assert [(item.dp_id, item.description.key) for item in button.get_mapping_by_device(device)] == [
+        (6, "bluetooth_unlock_dp6_test")
+    ]
     assert select.get_mapping_by_device(device) == []
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}

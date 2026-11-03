@@ -167,6 +167,31 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
     async def login(self, add_to_cache: bool = False) -> dict[Any, Any]:
         return await self._login(self._data, add_to_cache)
 
+    async def get_lock_unlock_properties(self, device_id: str) -> list[dict]:
+        """Read the LA-T01's latest DP19/70/71 cloud reports for a test command."""
+        if not self._has_login(self._data):
+            raise ValueError("Faltan credenciales de Tuya Cloud para probar DP71")
+        cache_key = self._get_cache_key(self._data)
+        item = _cache.get(cache_key)
+        if item is None or item.api is None:
+            if not self._is_login_success(await self.login(True)):
+                raise ValueError("No se pudo iniciar sesión en Tuya Cloud para probar DP71")
+            item = _cache.get(cache_key)
+        if item is None or item.api is None:
+            raise ValueError("No hay sesión de Tuya Cloud para probar DP71")
+
+        response = await self._hass.async_add_executor_job(
+            item.api.get,
+            f"/v2.0/cloud/thing/{device_id}/shadow/properties",
+        )
+        if not response.get(TUYA_RESPONSE_SUCCESS):
+            raise ValueError("No se pudieron consultar los DP de la cerradura en Tuya Cloud")
+        result = response.get(TUYA_RESPONSE_RESULT)
+        properties = result.get("properties") if isinstance(result, dict) else None
+        if not isinstance(properties, list):
+            raise ValueError("Tuya Cloud no devolvió propiedades de la cerradura")
+        return properties
+
     async def _fill_cache_item(self, item: TuyaCloudCacheItem) -> None:
         devices_response = await self._hass.async_add_executor_job(
             item.api.get,

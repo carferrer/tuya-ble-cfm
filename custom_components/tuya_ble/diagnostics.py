@@ -39,7 +39,11 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             {
                 "id": dp_id,
                 "type": datapoint.type.name,
-                "value": _serialize_value(datapoint.value),
+                "value": (
+                    "<redacted>"
+                    if device.product_id == "8gza4o8a" and dp_id in (70, 71)
+                    else _serialize_value(datapoint.value)
+                ),
                 "timestamp": datapoint.timestamp,
             }
         )
@@ -58,6 +62,10 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
         "received_dp_events": list(
             getattr(device, "_cfm_received_dp_events", [])
         ),
+        "la_t01_unlock_tests": {
+            "dp71_last_result": getattr(device, "_cfm_dp71_last_result", None),
+            "dp6_last_result": getattr(device, "_cfm_dp6_last_result", None),
+        } if device.product_id == "8gza4o8a" else None,
         "record_recovery": {
             "dp69_request_count": int(
                 getattr(device, "_cfm_dp69_request_count", 0)

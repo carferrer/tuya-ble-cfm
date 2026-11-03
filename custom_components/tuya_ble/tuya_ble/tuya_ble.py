@@ -1230,7 +1230,7 @@ class TuyaBLEDevice:
                 self.address,
                 id,
                 type.name,
-                value,
+                "<redacted>" if getattr(self, "product_id", None) == "8gza4o8a" and id in (70, 71) else value,
             )
             self._datapoints._update_from_device(
                 id, timestamp, flags, type, value)
@@ -1507,7 +1507,7 @@ class TuyaBLEDevice:
                 self.address,
                 dp.id,
                 dp.type.name,
-                dp.value,
+                "<redacted>" if getattr(self, "product_id", None) == "8gza4o8a" and dp.id in (70, 71) else dp.value,
             )
             data += pack(">BBB", dp.id, int(dp.type.value), len(value))
             data += value
