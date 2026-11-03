@@ -62,9 +62,14 @@ def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
             Platform.SWITCH,
         ]
     if device.product_id == PRODUCT_8GZA4O8A:
-        # DP70/71 use a verification exchange that has not been tested here.
-        # The button platform adds manual status refresh without a DP6 button.
-        return [Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT]
+        # Keep DP6 and lock/switch controls absent; only expose the DP31 selector.
+        return [
+            Platform.BUTTON,
+            Platform.SENSOR,
+            Platform.BINARY_SENSOR,
+            Platform.SELECT,
+            Platform.EVENT,
+        ]
     return [
         platform
         for platform in PLATFORMS

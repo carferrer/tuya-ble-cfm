@@ -8,12 +8,13 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from homeassistant.const import CONF_ADDRESS, CONF_DEVICE_ID, Platform
-from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 
 from custom_components.tuya_ble import _platforms_for_device, async_setup_entry
 from custom_components.tuya_ble import binary_sensor, button, config_flow, select, sensor
 from custom_components.tuya_ble.devices import get_product_info_by_ids
 from custom_components.tuya_ble.cloud import HASSTuyaBLEDeviceManager
+from custom_components.tuya_ble.tuya_ble import TuyaBLEDataPointType
 from custom_components.tuya_ble.const import (
     CONF_CATEGORY,
     CONF_DEVICE_NAME,
@@ -89,12 +90,63 @@ def test_la_t01_exposes_refresh_and_dp71_without_dp6():
         Platform.BUTTON,
         Platform.SENSOR,
         Platform.BINARY_SENSOR,
+        Platform.SELECT,
         Platform.EVENT,
     ]
     assert button.get_mapping_by_device(device) == []
-    assert select.get_mapping_by_device(device) == []
+    assert {item.dp_id for item in select.get_mapping_by_device(device)} == {31}
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 21}
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
+
+
+def test_la_t01_volume_connects_before_ble_write():
+    """Only the LA-T01 volume path wakes a sleeping lock before writing DP31."""
+    datapoint = SimpleNamespace(type=TuyaBLEDataPointType.DT_ENUM, set_value=AsyncMock())
+
+    def get_or_create(*args):
+        assert device.connected
+        return datapoint
+
+    device = SimpleNamespace(
+        product_id="8gza4o8a",
+        connected=False,
+        datapoints=SimpleNamespace(get_or_create=MagicMock(side_effect=get_or_create)),
+    )
+
+    async def reconnect():
+        device.connected = True
+
+    device.reconnect = AsyncMock(side_effect=reconnect)
+    device._lock_power_saver_touch = MagicMock()
+    entity = SimpleNamespace(
+        _device=device,
+        _mapping=select.get_mapping_by_device(device)[0],
+        _attr_options=["mute", "low", "normal", "high"],
+        async_write_ha_state=MagicMock(),
+    )
+    with patch("custom_components.tuya_ble.select.asyncio.sleep", new_callable=AsyncMock) as settle:
+        asyncio.run(select.TuyaBLELASelect.async_select_option(entity, "normal"))
+
+    device.reconnect.assert_awaited_once_with()
+    settle.assert_awaited_once_with(0.5)
+    device.datapoints.get_or_create.assert_called_once_with(31, TuyaBLEDataPointType.DT_ENUM, 2)
+    datapoint.set_value.assert_awaited_once_with(2)
+    entity.async_write_ha_state.assert_called_once_with()
+    device._lock_power_saver_touch.assert_called_once_with(5.0)
+
+
+def test_la_t01_volume_never_writes_without_ble_connection():
+    device = SimpleNamespace(
+        connected=False,
+        reconnect=AsyncMock(),
+        datapoints=SimpleNamespace(get_or_create=MagicMock()),
+    )
+    entity = SimpleNamespace(_device=device, _attr_options=["mute", "low", "normal", "high"])
+
+    with pytest.raises(HomeAssistantError, match="no estableció una conexión BLE"):
+        asyncio.run(select.TuyaBLELASelect.async_select_option(entity, "high"))
+
+    device.datapoints.get_or_create.assert_not_called()
 
 
 def test_existing_lock_credentials_load_without_cloud_and_missing_credentials_do_not_login():
