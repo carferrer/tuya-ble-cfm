@@ -13,6 +13,7 @@ from homeassistant.exceptions import ConfigEntryNotReady, HomeAssistantError
 from custom_components.tuya_ble import _platforms_for_device, async_setup_entry
 from custom_components.tuya_ble import binary_sensor, button, config_flow, select, sensor
 from custom_components.tuya_ble.devices import get_product_info_by_ids
+from custom_components.tuya_ble import cloud
 from custom_components.tuya_ble.cloud import HASSTuyaBLEDeviceManager
 from custom_components.tuya_ble.tuya_ble import TuyaBLEDataPointType
 from custom_components.tuya_ble.const import (
@@ -273,6 +274,100 @@ def test_existing_lock_credentials_load_without_cloud_and_missing_credentials_do
 
     manager.data.pop(CONF_LOCAL_KEY)
     assert asyncio.run(manager.get_device_credentials("AA:BB:CC:DD:EE:FF")) is None
+    manager.login.assert_not_awaited()
+
+
+def test_cloud_cache_does_not_mix_two_locks_from_one_account():
+    """Reusing account data must not copy another lock's BLE pairing fields."""
+    login = {key: f"login-{key}" for key in cloud.CONF_TUYA_LOGIN_KEYS}
+    first = {
+        CONF_ADDRESS: "AA:BB:CC:DD:EE:01",
+        CONF_UUID: "uuid-1",
+        CONF_LOCAL_KEY: "local-key-1",
+        CONF_DEVICE_ID: "device-1",
+        CONF_CATEGORY: "ms",
+        CONF_PRODUCT_ID: "7a4xvbtt",
+    }
+    second = {
+        CONF_ADDRESS: "AA:BB:CC:DD:EE:02",
+        CONF_UUID: "uuid-2",
+        CONF_LOCAL_KEY: "local-key-2",
+        CONF_DEVICE_ID: "device-2",
+        CONF_CATEGORY: "ms",
+        CONF_PRODUCT_ID: "7a4xvbtt",
+    }
+    entries = [
+        SimpleNamespace(options={**login, **first}),
+        SimpleNamespace(options={**login, **second}),
+    ]
+
+    class FakeHass:
+        config_entries = SimpleNamespace(
+            async_entries=lambda domain: entries if domain == cloud.DOMAIN else []
+        )
+
+        async def async_add_executor_job(self, fn, *args):
+            return fn(*args)
+
+    api = MagicMock()
+    api.connect.return_value = {cloud.TUYA_RESPONSE_SUCCESS: True}
+    manager = HASSTuyaBLEDeviceManager(FakeHass(), {})
+
+    async def fill_cache(item):
+        item.credentials.update(
+            {first[CONF_ADDRESS]: first, second[CONF_ADDRESS]: second}
+        )
+
+    manager._fill_cache_item = AsyncMock(side_effect=fill_cache)
+    with (
+        patch.dict(cloud._cache, {}, clear=True),
+        patch.object(cloud, "TuyaOpenAPI", return_value=api),
+    ):
+        asyncio.run(manager.build_cache())
+        item = next(iter(cloud._cache.values()))
+        assert item.login == login
+        assert item.login is not entries[0].options
+        assert item.login is not entries[1].options
+
+        manager.get_login_from_cache()
+        assert manager.data == login
+        assert CONF_DEVICE_ID not in manager.data
+
+
+def test_new_lock_uses_credentials_for_its_own_address():
+    """Selecting a second lock must replace the first lock's BLE identity."""
+    first_address = "AA:BB:CC:DD:EE:01"
+    second_address = "AA:BB:CC:DD:EE:02"
+    first = {
+        CONF_ADDRESS: first_address,
+        CONF_UUID: "uuid-1",
+        CONF_LOCAL_KEY: "local-key-1",
+        CONF_DEVICE_ID: "device-1",
+        CONF_CATEGORY: "ms",
+        CONF_PRODUCT_ID: "7a4xvbtt",
+        cloud.CONF_FUNCTIONS: ["old-function"],
+    }
+    second = {
+        CONF_ADDRESS: second_address,
+        CONF_UUID: "uuid-2",
+        CONF_LOCAL_KEY: "local-key-2",
+        CONF_DEVICE_ID: "device-2",
+        CONF_CATEGORY: "ms",
+        CONF_PRODUCT_ID: "7a4xvbtt",
+    }
+    manager = HASSTuyaBLEDeviceManager(MagicMock(), first.copy())
+    manager.login = AsyncMock(side_effect=AssertionError("Unexpected Tuya Cloud login"))
+    cache_item = cloud.TuyaCloudCacheItem(None, {}, {second_address: second})
+
+    with patch.dict(cloud._cache, {"account": cache_item}, clear=True):
+        credentials = asyncio.run(
+            manager.get_device_credentials(second_address, save_data=True)
+        )
+
+    assert credentials.device_id == "device-2"
+    assert manager.data[CONF_ADDRESS] == second_address
+    assert manager.data[CONF_UUID] == "uuid-2"
+    assert cloud.CONF_FUNCTIONS not in manager.data
     manager.login.assert_not_awaited()
 
 

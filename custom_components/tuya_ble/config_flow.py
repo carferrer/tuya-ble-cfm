@@ -208,35 +208,40 @@ class TuyaBLEOptionsFlow(OptionsFlowWithConfigEntry):
             domain_data = self.hass.data.get(DOMAIN)
             if domain_data:
                 entry = domain_data.get(self.config_entry.entry_id)
-            if entry:
-                login_data = await _try_login(
-                    entry.manager,
-                    user_input,
-                    errors,
-                    placeholders,
+            manager = (
+                entry.manager
+                if entry
+                else HASSTuyaBLEDeviceManager(
+                    self.hass, dict(self.config_entry.options)
                 )
-                if login_data:
-                    credentials = await entry.manager.get_device_credentials(
-                        address, True, True
+            )
+            login_data = await _try_login(
+                manager,
+                user_input,
+                errors,
+                placeholders,
+            )
+            if login_data:
+                manager.data.update(login_data)
+                credentials = await manager.get_device_credentials(address, True, True)
+                if credentials:
+                    options = dict(manager.data)
+                    options[CONF_CONNECTION_MODE] = user_input.get(
+                        CONF_CONNECTION_MODE,
+                        DEFAULT_CONNECTION_MODE,
                     )
-                    if credentials:
-                        options = dict(entry.manager.data)
-                        options[CONF_CONNECTION_MODE] = user_input.get(
-                            CONF_CONNECTION_MODE,
-                            DEFAULT_CONNECTION_MODE,
+                    options[CONF_SYNC_INTERVAL] = int(
+                        user_input.get(
+                            CONF_SYNC_INTERVAL,
+                            DEFAULT_SYNC_INTERVAL,
                         )
-                        options[CONF_SYNC_INTERVAL] = int(
-                            user_input.get(
-                                CONF_SYNC_INTERVAL,
-                                DEFAULT_SYNC_INTERVAL,
-                            )
-                        )
-                        return self.async_create_entry(
-                            title=self.config_entry.title,
-                            data=options,
-                        )
+                    )
+                    return self.async_create_entry(
+                        title=self.config_entry.title,
+                        data=options,
+                    )
 
-                    errors["base"] = "device_not_registered"
+                errors["base"] = "device_not_registered"
 
         if user_input is None:
             user_input = {}
