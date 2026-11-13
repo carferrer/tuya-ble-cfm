@@ -166,13 +166,18 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
                 auth_type = data[CONF_AUTH_TYPE]
                 if isinstance(auth_type, AuthType):
                     data[CONF_AUTH_TYPE] = auth_type.value
-                cache_key = self._get_cache_key(data)
+                # The caller may reuse its dictionary for another config entry.
+                # Keep only a snapshot of the account login in the shared cache.
+                login_data = {
+                    key: data[key] for key in CONF_TUYA_LOGIN_KEYS if key in data
+                }
+                cache_key = self._get_cache_key(login_data)
                 cache_item = _cache.get(cache_key)
                 if cache_item:
                     cache_item.api = api
-                    cache_item.login = data
+                    cache_item.login = login_data
                 else:
-                    _cache[cache_key] = TuyaCloudCacheItem(api, data, {})
+                    _cache[cache_key] = TuyaCloudCacheItem(api, login_data, {})
 
         return response
 
@@ -276,11 +281,9 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
     async def build_cache(self) -> None:
         global _cache
-        data = {}
         tuya_config_entries = self._hass.config_entries.async_entries(TUYA_DOMAIN)
         for config_entry in tuya_config_entries:
-            data.clear()
-            data.update(config_entry.data)
+            data = dict(config_entry.data)
             key = self._get_cache_key(data)
             item = _cache.get(key)
             if item is None or len(item.credentials) == 0:
@@ -291,8 +294,7 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
         ble_config_entries = self._hass.config_entries.async_entries(DOMAIN)
         for config_entry in ble_config_entries:
-            data.clear()
-            data.update(config_entry.options)
+            data = dict(config_entry.options)
             key = self._get_cache_key(data)
             item = _cache.get(key)
             if item is None or len(item.credentials) == 0:
@@ -304,7 +306,13 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
     def get_login_from_cache(self) -> None:
         global _cache
         for cache_item in _cache.values():
-            self._data.update(cache_item.login)
+            self._data.update(
+                {
+                    key: cache_item.login[key]
+                    for key in CONF_TUYA_LOGIN_KEYS
+                    if key in cache_item.login
+                }
+            )
             break
 
     async def get_device_credentials(
@@ -319,7 +327,15 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
         credentials: dict[str, any] | None = None
         result: TuyaBLEDeviceCredentials | None = None
 
-        if not force_update and self._has_credentials(self._data):
+        stored_address = self._data.get(CONF_ADDRESS)
+        stored_credentials_match = self._has_credentials(self._data) and (
+            not self._allow_cloud_credentials
+            or (
+                isinstance(stored_address, str)
+                and stored_address.upper() == address.upper()
+            )
+        )
+        if not force_update and stored_credentials_match:
             credentials = self._data.copy()
         else:
             # Setup of an existing entry must never depend on Tuya Cloud.
@@ -339,6 +355,7 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
 
             if item is None or force_update:
                 if self._is_login_success(await self.login(True)):
+                    cache_key = self._get_cache_key(self._data)
                     item = _cache.get(cache_key)
                     if item:
                         await self._fill_cache_item(item)
@@ -362,6 +379,13 @@ class HASSTuyaBLEDeviceManager(AbstaractTuyaBLEDeviceManager):
             if save_data:
                 if item:
                     self._data.update(item.login)
+                for key in (
+                    *CONF_TUYA_DEVICE_KEYS,
+                    CONF_FUNCTIONS,
+                    CONF_STATUS_RANGE,
+                    CONF_ADDRESS,
+                ):
+                    self._data.pop(key, None)
                 self._data.update(credentials)
 
         return result
