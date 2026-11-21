@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, Callable
+
+from bluetooth_data_tools import monotonic_time_coarse
+from homeassistant.components import bluetooth
+from homeassistant.helpers.event import async_track_time_interval
 
 from homeassistant.components.sensor import (
     RestoreSensor,
@@ -178,6 +182,44 @@ class TuyaBLESensor(TuyaBLEEntity, SensorEntity):
                 else:
                     self._attr_native_value = datapoint.value
         self.async_write_ha_state()
+
+
+class TuyaBLEPeriodicRSSISensor(TuyaBLESensor):
+    """Expire RSSI from passive advertisements, independently of GATT state."""
+
+    def __init__(self, hass, entry, coordinator, device, product):
+        super().__init__(hass, coordinator, device, product, rssi_mapping)
+        self._expiry_seconds = sync_interval_minutes(entry) * 60
+
+    @property
+    def available(self) -> bool:
+        # A missing/stale advertisement is unknown, not unavailable.
+        return True
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        self.async_on_remove(async_track_time_interval(
+            self.hass, self._refresh_rssi, timedelta(seconds=5)
+        ))
+        self._refresh_rssi()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._refresh_rssi()
+
+    @callback
+    def _refresh_rssi(self, _now=None) -> None:
+        # Poll HA's existing advertisement cache: this does not connect or scan.
+        # Sampling also sees repeated advertisements with identical payloads.
+        info = bluetooth.async_last_service_info(
+            self.hass, self._device.address, connectable=False
+        )
+        value = None
+        if info is not None and 0 <= monotonic_time_coarse() - info.time < self._expiry_seconds:
+            value = info.rssi
+        if value != self._attr_native_value:
+            self._attr_native_value = value
+            self.async_write_ha_state()
 
 
 class TuyaBLEAlarmSensor(TuyaBLEEntity, RestoreSensor):
@@ -459,7 +501,9 @@ async def async_setup_entry(
         TuyaBLELastConnectedSensor(hass, data),
         TuyaBLELastProxySensor(hass, entry, data),
         TuyaBLESyncIntervalSensor(entry, data.device),
-        TuyaBLESensor(
+        TuyaBLEPeriodicRSSISensor(
+            hass, entry, data.coordinator, data.device, data.product
+        ) if connection_mode(entry) == CONNECTION_MODE_PERIODIC_SYNC else TuyaBLESensor(
             hass,
             data.coordinator,
             data.device,

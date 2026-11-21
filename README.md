@@ -75,7 +75,7 @@ Home Assistant necesita acceso BLE a la cerradura, mediante un adaptador compati
 | Sensor binario `ble_connection` | Sesión Bluetooth emparejada activa con HA, los cuatro productos |
 | Sensor `Alarm` | DP21, último valor de alarma recibido |
 | Batería | DP8 en `okkyfgfs`, `7a4xvbtt` y LA-T01; DP9 `battery_state` en `b3aouluh` |
-| RSSI | Diagnóstico de señal |
+| RSSI | Diagnóstico de señal. En sincronización periódica pasa a desconocido si el último anuncio Bluetooth tiene una antigüedad igual o superior al intervalo configurado; recupera el valor al recibir anuncios recientes. Se comprueba cada 5 segundos sin conectar con la cerradura. Los demás modos conservan su comportamiento. |
 | Evento `Access` | Aperturas DP12/13/14/15/19/55/62/63, cuando la cerradura los reporta |
 | Sensor `Last access` | Hora de la apertura más reciente, los cuatro productos |
 | Evento `Alarm events` | Registros individuales DP21, cuando la cerradura los reporta |
