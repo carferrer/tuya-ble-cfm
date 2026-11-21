@@ -378,6 +378,68 @@ class TuyaBLELastAccessSensor(SensorEntity):
         self.async_write_ha_state()
 
 
+class TuyaBLELastAdvertisementSensor(TuyaBLEEntity, RestoreSensor):
+    """Retain the latest observed advertisement timestamp in every mode."""
+
+    def __init__(self, hass: HomeAssistant, data: TuyaBLEData) -> None:
+        super().__init__(
+            hass, data.coordinator, data.device, data.product,
+            SensorEntityDescription(
+                key="last_advertisement",
+                name="Último anuncio Bluetooth",
+                device_class=SensorDeviceClass.TIMESTAMP,
+                entity_category=EntityCategory.DIAGNOSTIC,
+            ),
+        )
+        self._last_advertisement_time: float | None = None
+        self._attr_native_value = None
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        restored = await self.async_get_last_sensor_data()
+        value = restored.native_value if restored else None
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value)
+            except ValueError:
+                value = None
+        if isinstance(value, datetime) and value.tzinfo is not None:
+            if self._attr_native_value is None or value > self._attr_native_value:
+                self._attr_native_value = value
+        self.async_on_remove(async_track_time_interval(
+            self.hass, self._refresh_advertisement, timedelta(seconds=5)
+        ))
+        self._refresh_advertisement()
+        self.async_write_ha_state()
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        self._refresh_advertisement()
+
+    @callback
+    def _refresh_advertisement(self, _now=None) -> None:
+        info = bluetooth.async_last_service_info(
+            self.hass, self._device.address, connectable=False
+        )
+        if info is None:
+            return
+        if self._last_advertisement_time is not None and info.time <= self._last_advertisement_time:
+            return
+        age = monotonic_time_coarse() - info.time
+        if age < 0:
+            return
+        self._last_advertisement_time = info.time
+        # Convert the reception time, not the time when we sampled HA's cache.
+        received_at = datetime.now(UTC) - timedelta(seconds=age)
+        if self._attr_native_value is None or received_at > self._attr_native_value:
+            self._attr_native_value = received_at
+            self.async_write_ha_state()
+
+
 class TuyaBLELastConnectedSensor(TuyaBLEEntity, SensorEntity):
     """Timestamp of the latest completed, paired BLE connection."""
 
@@ -499,6 +561,7 @@ async def async_setup_entry(
     mappings = get_mapping_by_device(data.device)
     entities: list[SensorEntity] = [
         TuyaBLELastConnectedSensor(hass, data),
+        TuyaBLELastAdvertisementSensor(hass, data),
         TuyaBLELastProxySensor(hass, entry, data),
         TuyaBLESyncIntervalSensor(entry, data.device),
         TuyaBLEPeriodicRSSISensor(
