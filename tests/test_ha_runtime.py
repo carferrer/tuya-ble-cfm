@@ -418,3 +418,67 @@ def test_country_lookup_does_not_block_home_assistant_loop():
     lookup.assert_called_once_with(alpha_2="ES")
     assert result["step_id"] == "login"
     assert result["data_schema"].schema
+
+
+def _battery_state_entity(datapoint=None):
+    entity = sensor.TuyaBLEBatteryStateSensor.__new__(sensor.TuyaBLEBatteryStateSensor)
+    entity._mapping = SimpleNamespace(dp_id=9)
+    entity.entity_description = SimpleNamespace(options=["high", "medium", "low"])
+    entity._device = SimpleNamespace(datapoints={9: datapoint})
+    entity._attr_native_value = None
+    entity._last_saved_value = None
+    entity._store = SimpleNamespace(
+        async_load=AsyncMock(return_value=None), async_delay_save=MagicMock()
+    )
+    entity.async_get_last_sensor_data = AsyncMock(return_value=None)
+    entity.async_get_last_state = AsyncMock(return_value=None)
+    entity.async_write_ha_state = MagicMock()
+    return entity
+
+
+def test_battery_state_survives_disconnect_and_rejects_invalid_reports():
+    entity = _battery_state_entity(
+        SimpleNamespace(type=TuyaBLEDataPointType.DT_ENUM, value=2)
+    )
+    entity._handle_coordinator_update()
+    assert entity.native_value == "low"
+    assert entity.available
+    save_callback, _delay = entity._store.async_delay_save.call_args.args
+    assert save_callback() == {"value": "low"}
+    for report in (None, SimpleNamespace(type=TuyaBLEDataPointType.DT_ENUM, value=99)):
+        entity._device.datapoints[9] = report
+        entity._handle_coordinator_update()
+        assert entity.available and entity.native_value == "low"
+
+
+@pytest.mark.parametrize("source", ["store", "sensor_data", "state"])
+def test_battery_state_restores_saved_value(source):
+    entity = _battery_state_entity()
+    if source == "store":
+        entity._store.async_load.return_value = {"value": "medium"}
+    elif source == "sensor_data":
+        entity.async_get_last_sensor_data.return_value = SimpleNamespace(native_value="medium")
+    else:
+        entity.async_get_last_state.return_value = SimpleNamespace(state="medium")
+    with patch.object(sensor.TuyaBLEEntity, "async_added_to_hass", new_callable=AsyncMock):
+        asyncio.run(entity.async_added_to_hass())
+    assert entity.available and entity.native_value == "medium"
+
+
+def test_battery_state_live_report_wins_over_saved_state():
+    entity = _battery_state_entity(
+        SimpleNamespace(type=TuyaBLEDataPointType.DT_ENUM, value=0)
+    )
+    entity._store.async_load.return_value = {"value": "low"}
+    with patch.object(sensor.TuyaBLEEntity, "async_added_to_hass", new_callable=AsyncMock):
+        asyncio.run(entity.async_added_to_hass())
+    assert entity.native_value == "high"
+
+
+def test_battery_state_without_valid_history_is_unknown():
+    entity = _battery_state_entity()
+    entity._store.async_load.return_value = {"value": "unavailable"}
+    entity.async_get_last_state.return_value = SimpleNamespace(state="unknown")
+    with patch.object(sensor.TuyaBLEEntity, "async_added_to_hass", new_callable=AsyncMock):
+        asyncio.run(entity.async_added_to_hass())
+    assert entity.available and entity.native_value is None
