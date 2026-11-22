@@ -1,4 +1,4 @@
-homeassistant==2026.11.1
+homeassistant==2026.11.2
 pytest==9.1.1
 pycryptodome
 bleak-retry-connector==4.7.1
