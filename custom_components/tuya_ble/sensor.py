@@ -241,6 +241,11 @@ class TuyaBLEBatterySensor(TuyaBLEEntity, RestoreSensor):
         )
         for value in candidates:
             options = self.entity_description.options
+            if options is None and isinstance(value, str):
+                try:
+                    value = float(value)
+                except ValueError:
+                    continue
             valid = (
                 value in options if options is not None
                 else type(value) in (int, float) and 0 <= value <= 100
