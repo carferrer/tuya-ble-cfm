@@ -184,6 +184,80 @@ class TuyaBLESensor(TuyaBLEEntity, SensorEntity):
         self.async_write_ha_state()
 
 
+class TuyaBLEBatterySensor(TuyaBLEEntity, RestoreSensor):
+    """Keep valid DP8/DP9 battery reports while asleep and across restarts."""
+
+    def __init__(self, hass, entry, coordinator, device, product, mapping):
+        super().__init__(hass, coordinator, device, product, mapping.description)
+        self._mapping = mapping
+        self._attr_native_value = None
+        self._last_saved_value = None
+        self._store = Store(hass, 1, f"{DOMAIN}.battery.{entry.entry_id}.{mapping.dp_id}")
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        datapoint = self._device.datapoints[self._mapping.dp_id]
+        options = self.entity_description.options
+        value = None
+        if datapoint is not None:
+            if (
+                options is not None
+                and datapoint.type == TuyaBLEDataPointType.DT_ENUM
+                and type(datapoint.value) is int
+                and 0 <= datapoint.value < len(options)
+            ):
+                value = options[datapoint.value]
+            elif (
+                options is None
+                and datapoint.type == TuyaBLEDataPointType.DT_VALUE
+                and type(datapoint.value) in (int, float)
+                and 0 <= datapoint.value <= 100
+            ):
+                value = datapoint.value
+        if value is not None:
+            self._attr_native_value = value
+            if value != self._last_saved_value:
+                self._last_saved_value = value
+                self._store.async_delay_save(lambda: {"value": value}, 1.0)
+        self.async_write_ha_state()
+
+    async def async_added_to_hass(self) -> None:
+        await super().async_added_to_hass()
+        stored = await self._store.async_load()
+        last_data = await self.async_get_last_sensor_data()
+        last_state = await self.async_get_last_state()
+        # Reports received during restoration take precedence over saved state.
+        self._handle_coordinator_update()
+        if self.native_value is not None:
+            return
+        candidates = (
+            stored.get("value") if isinstance(stored, dict) else None,
+            last_data.native_value if last_data is not None else None,
+            last_state.state if last_state is not None else None,
+        )
+        for value in candidates:
+            options = self.entity_description.options
+            if options is None and isinstance(value, str):
+                try:
+                    value = float(value)
+                except ValueError:
+                    continue
+            valid = (
+                value in options if options is not None
+                else type(value) in (int, float) and 0 <= value <= 100
+            )
+            if valid:
+                self._attr_native_value = value
+                self._last_saved_value = value
+                self._store.async_delay_save(lambda: {"value": value}, 1.0)
+                self.async_write_ha_state()
+                return
+
+
 class TuyaBLEPeriodicRSSISensor(TuyaBLESensor):
     """Expire RSSI from passive advertisements, independently of GATT state."""
 
@@ -576,7 +650,13 @@ async def async_setup_entry(
     ]
     for item in mappings:
         if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type):
-            if item.dp_id == 21:
+            if item.description.key in ("battery_state", "battery"):
+                entities.append(
+                    TuyaBLEBatterySensor(
+                        hass, entry, data.coordinator, data.device, data.product, item
+                    )
+                )
+            elif item.dp_id == 21:
                 entities.append(
                     TuyaBLEAlarmSensor(
                         hass, entry, data.coordinator, data.device, data.product, item
