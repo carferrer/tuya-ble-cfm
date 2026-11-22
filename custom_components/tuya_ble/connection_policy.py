@@ -37,6 +37,8 @@ SYNC_INTERVALS = {
     15: "15 minutes",
     30: "30 minutes",
     60: "1 hour",
+    120: "2 hours",
+    180: "3 hours",
     300: "5 hours",
     720: "12 hours",
     1440: "24 hours",
