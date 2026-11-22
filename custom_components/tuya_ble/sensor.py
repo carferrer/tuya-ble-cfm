@@ -184,15 +184,15 @@ class TuyaBLESensor(TuyaBLEEntity, SensorEntity):
         self.async_write_ha_state()
 
 
-class TuyaBLEBatteryStateSensor(TuyaBLEEntity, RestoreSensor):
-    """Keep the last valid DP9 report while the lock sleeps and across restarts."""
+class TuyaBLEBatterySensor(TuyaBLEEntity, RestoreSensor):
+    """Keep valid DP8/DP9 battery reports while asleep and across restarts."""
 
     def __init__(self, hass, entry, coordinator, device, product, mapping):
         super().__init__(hass, coordinator, device, product, mapping.description)
         self._mapping = mapping
         self._attr_native_value = None
         self._last_saved_value = None
-        self._store = Store(hass, 1, f"{DOMAIN}.battery_state.{entry.entry_id}")
+        self._store = Store(hass, 1, f"{DOMAIN}.battery.{entry.entry_id}.{mapping.dp_id}")
 
     @property
     def available(self) -> bool:
@@ -202,13 +202,23 @@ class TuyaBLEBatteryStateSensor(TuyaBLEEntity, RestoreSensor):
     def _handle_coordinator_update(self) -> None:
         datapoint = self._device.datapoints[self._mapping.dp_id]
         options = self.entity_description.options
-        if (
-            datapoint is not None
-            and datapoint.type == TuyaBLEDataPointType.DT_ENUM
-            and type(datapoint.value) is int
-            and 0 <= datapoint.value < len(options)
-        ):
-            value = options[datapoint.value]
+        value = None
+        if datapoint is not None:
+            if (
+                options is not None
+                and datapoint.type == TuyaBLEDataPointType.DT_ENUM
+                and type(datapoint.value) is int
+                and 0 <= datapoint.value < len(options)
+            ):
+                value = options[datapoint.value]
+            elif (
+                options is None
+                and datapoint.type == TuyaBLEDataPointType.DT_VALUE
+                and type(datapoint.value) in (int, float)
+                and 0 <= datapoint.value <= 100
+            ):
+                value = datapoint.value
+        if value is not None:
             self._attr_native_value = value
             if value != self._last_saved_value:
                 self._last_saved_value = value
@@ -230,7 +240,12 @@ class TuyaBLEBatteryStateSensor(TuyaBLEEntity, RestoreSensor):
             last_state.state if last_state is not None else None,
         )
         for value in candidates:
-            if value in self.entity_description.options:
+            options = self.entity_description.options
+            valid = (
+                value in options if options is not None
+                else type(value) in (int, float) and 0 <= value <= 100
+            )
+            if valid:
                 self._attr_native_value = value
                 self._last_saved_value = value
                 self._store.async_delay_save(lambda: {"value": value}, 1.0)
@@ -630,9 +645,9 @@ async def async_setup_entry(
     ]
     for item in mappings:
         if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type):
-            if item.description.key == "battery_state":
+            if item.description.key in ("battery_state", "battery"):
                 entities.append(
-                    TuyaBLEBatteryStateSensor(
+                    TuyaBLEBatterySensor(
                         hass, entry, data.coordinator, data.device, data.product, item
                     )
                 )
