@@ -421,7 +421,7 @@ def test_country_lookup_does_not_block_home_assistant_loop():
 
 
 def _battery_state_entity(datapoint=None):
-    entity = sensor.TuyaBLEBatteryStateSensor.__new__(sensor.TuyaBLEBatteryStateSensor)
+    entity = sensor.TuyaBLEBatterySensor.__new__(sensor.TuyaBLEBatterySensor)
     entity._mapping = SimpleNamespace(dp_id=9)
     entity.entity_description = SimpleNamespace(options=["high", "medium", "low"])
     entity._device = SimpleNamespace(datapoints={9: datapoint})
@@ -482,3 +482,22 @@ def test_battery_state_without_valid_history_is_unknown():
     with patch.object(sensor.TuyaBLEEntity, "async_added_to_hass", new_callable=AsyncMock):
         asyncio.run(entity.async_added_to_hass())
     assert entity.available and entity.native_value is None
+
+
+@pytest.mark.parametrize("level", [0, 52, 100])
+def test_percentage_battery_restores_and_updates(level):
+    entity = _battery_state_entity()
+    entity._mapping.dp_id = 8
+    entity.entity_description.options = None
+    entity._device.datapoints = {8: None}
+    entity._store.async_load.return_value = {"value": level}
+    with patch.object(sensor.TuyaBLEEntity, "async_added_to_hass", new_callable=AsyncMock):
+        asyncio.run(entity.async_added_to_hass())
+    assert entity.available and entity.native_value == level
+    entity._device.datapoints[8] = SimpleNamespace(type=TuyaBLEDataPointType.DT_VALUE, value=42)
+    entity._handle_coordinator_update()
+    assert entity.native_value == 42
+    for invalid in (-1, 101, True, float("nan")):
+        entity._device.datapoints[8].value = invalid
+        entity._handle_coordinator_update()
+        assert entity.native_value == 42
