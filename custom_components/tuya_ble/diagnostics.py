@@ -81,6 +81,12 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "stage": getattr(device, "_fd50_stage", "not_started"),
             "last_error": getattr(device, "_fd50_last_error", None),
             "write_capacity": getattr(device, "_fd50_write_size", None),
+            "v4_received": getattr(device, "_fd50_v4_received", 0),
+            "v4_parsed": getattr(device, "_fd50_v4_parsed", 0),
+            "v4_rejected": getattr(device, "_fd50_v4_rejected", 0),
+            "v4_acks_sent": getattr(device, "_fd50_v4_acks_sent", 0),
+            "v4_ack_errors": getattr(device, "_fd50_v4_ack_errors", 0),
+            "v4_last_report": getattr(device, "_fd50_v4_last_report", None),
         } if device.product_id == "99gv5nmz" else None,
         "record_recovery": {
             "dp69_request_count": int(
