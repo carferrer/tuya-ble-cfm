@@ -1,9 +1,7 @@
-"""Offline DLOCK-X1 verification import and DP71 format; no cloud or DP70 I/O."""
+"""DLOCK-X1 configured verification and DP71 format; no file, cloud or DP70 I/O."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 import re
 
 PRODUCT_ID = "99gv5nmz"
@@ -21,7 +19,7 @@ def parse_seed(value: str) -> bytes:
 
 def seed_record(value: str, product_id: str, device_id: str, address: str) -> dict:
     """Bind manually entered verification to this existing HA device identity."""
-    private_filename(address)
+    _validate_address(address)
     if product_id != PRODUCT_ID or not isinstance(device_id, str) or not device_id:
         raise ValueError("Identidad DLOCK-X1 no válida")
     return {"version": 1, "product_id": PRODUCT_ID, "device_id": device_id,
@@ -41,32 +39,12 @@ def configured_seed(data: dict, product_id: str, device_id: str, address: str) -
     return parse_seed(data.get("seed"))
 
 
-def private_filename(address: str) -> str:
-    """Use only a validated Bluetooth address in the private filename."""
+def _validate_address(address: str) -> None:
+    """Validate the Bluetooth address bound to the configured verification."""
     if not isinstance(address, str) or not re.fullmatch(
         r"(?:[0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}", address
     ):
         raise ValueError("Dirección Bluetooth no válida")
-    return f"dlock_{address.replace(':', '').lower()}.json"
-
-
-def load_seed(path: str, product_id: str, device_id: str, address: str) -> bytes:
-    """Read a bounded private file off the event loop; never expose its content."""
-    if product_id != PRODUCT_ID:
-        raise ValueError("Control exclusivo de DLOCK-X1")
-    private_filename(address)
-    try:
-        with Path(path).open("r", encoding="utf-8-sig") as source:
-            contents = source.read(4097)
-        if len(contents) > 4096:
-            raise ValueError
-        data = json.loads(contents)
-        return configured_seed(data, product_id, device_id, address)
-    except (OSError, UnicodeError, ValueError):
-        raise ValueError(
-            "No se ha definido un seed válido para esta cerradura. "
-            "Añádelo en Tuya BLE → Configurar → Apertura local"
-        ) from None
 
 
 def build_command(seed: bytes, timestamp: int) -> bytes:

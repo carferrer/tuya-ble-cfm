@@ -13,7 +13,7 @@ from homeassistant.helpers.storage import Store
 
 from .devices import TuyaBLEEntity
 from .dlock_unlock import (
-    CONF_DLOCK_SEED, build_command, configured_seed, load_seed, private_filename, response_result,
+    CONF_DLOCK_SEED, build_command, configured_seed, response_result,
 )
 from .select import TuyaBLELASelect, TuyaBLESelectMapping
 from .tuya_ble import TuyaBLEDataPointType
@@ -69,7 +69,7 @@ class DLOCKVolumeSelect(TuyaBLELASelect):
 
 
 class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
-    """Send one local DP71 with this unit's privately imported verification."""
+    """Send one local DP71 using only this unit's configured verification."""
 
     def __init__(self, hass, data, config_entry):
         super().__init__(
@@ -90,24 +90,21 @@ class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
         if self._device.product_id != "99gv5nmz":
             raise HomeAssistantError("Control exclusivo de DLOCK-X1")
         async with command_lock(self._device):
+            if CONF_DLOCK_SEED not in self._config_entry.options:
+                raise HomeAssistantError(
+                    "No se ha definido el seed para esta cerradura. "
+                    "Añádelo en Tuya BLE → Configurar → Apertura local"
+                )
             try:
-                if CONF_DLOCK_SEED in self._config_entry.options:
-                    seed = configured_seed(
-                        self._config_entry.options[CONF_DLOCK_SEED],
-                        self._device.product_id, self._device.device_id, self._device.address,
-                    )
-                else:
-                    # Compatibility with the initial private-file trial. Once
-                    # configured, never fall back to possibly stale verification.
-                    path = self._hass.config.path(
-                        "tuya_ble_private", private_filename(self._device.address)
-                    )
-                    seed = await self._hass.async_add_executor_job(
-                        load_seed, path, self._device.product_id,
-                        self._device.device_id, self._device.address,
-                    )
-            except ValueError as err:
-                raise HomeAssistantError(str(err)) from None
+                seed = configured_seed(
+                    self._config_entry.options[CONF_DLOCK_SEED],
+                    self._device.product_id, self._device.device_id, self._device.address,
+                )
+            except ValueError:
+                raise HomeAssistantError(
+                    "El seed guardado no es válido para esta cerradura. "
+                    "Revísalo en Tuya BLE → Configurar → Apertura local"
+                ) from None
             # Generate the timestamp after connection, not before a slow handshake.
             if not self._device.connected:
                 await self._device.reconnect()

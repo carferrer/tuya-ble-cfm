@@ -145,18 +145,12 @@ def local_unlock_entity(tmp_path, unit=1, seed="0005616263646566676801"):
     unsubscribe = MagicMock(side_effect=lambda: callbacks.clear())
     device.register_callback = MagicMock(side_effect=lambda cb: (callbacks.append(cb), unsubscribe)[1])
     path = tmp_path / "tuya_ble_private" / f"dlock_aabbccddee{unit:02x}.json"
-    path.parent.mkdir(exist_ok=True)
-    path.write_text(json.dumps({
-        "version": 1, "product_id": "99gv5nmz", "device_id": device.device_id,
-        "address": address, "seed": seed,
-    }))
-    async def executor(fn, *args):
-        return fn(*args)
     hass = SimpleNamespace(
-        config=SimpleNamespace(path=lambda *parts: str(tmp_path.joinpath(*parts))),
-        async_add_executor_job=AsyncMock(side_effect=executor),
+        config=SimpleNamespace(path=MagicMock(side_effect=AssertionError("File lookup forbidden"))),
+        async_add_executor_job=AsyncMock(side_effect=AssertionError("File loading forbidden")),
     )
-    entity = SimpleNamespace(_device=device, _hass=hass, _config_entry=SimpleNamespace(options={}))
+    record = seed_record(seed, device.product_id, device.device_id, address)
+    entity = SimpleNamespace(_device=device, _hass=hass, _config_entry=SimpleNamespace(options={CONF_DLOCK_SEED: record}))
     return entity, path, callbacks, unsubscribe
 
 
@@ -170,7 +164,7 @@ def test_configured_seed_opens_without_private_file(tmp_path, unit):
     device = entity._device
     record = seed_record("0005616263646566676801", device.product_id, device.device_id, device.address)
     entity._config_entry.options[CONF_DLOCK_SEED] = json.loads(json.dumps(record))
-    path.unlink()
+    assert not path.exists()
     async def send(device, dp, kind, command):
         callbacks[0]([SimpleNamespace(id=71, type=DP.DT_RAW, value=reply_to(command))])
     with patch(f"{CONTROLS}.write_dp", AsyncMock(side_effect=send)) as sender:
@@ -181,9 +175,11 @@ def test_configured_seed_opens_without_private_file(tmp_path, unit):
     assert device._dlock_dp71_last_result["status"] == "confirmed"
 
 
-def test_invalid_configured_seed_does_not_fall_back_to_valid_file(tmp_path):
+def test_invalid_configured_seed_does_not_read_valid_old_file(tmp_path):
     entity, path, _, _ = local_unlock_entity(tmp_path)
-    record = json.loads(path.read_text())
+    record = entity._config_entry.options[CONF_DLOCK_SEED]
+    path.parent.mkdir()
+    path.write_text(json.dumps(record))
     record["device_id"] = "another-unit"
     entity._config_entry.options[CONF_DLOCK_SEED] = record
     entity._device.connected = False
@@ -195,19 +191,28 @@ def test_invalid_configured_seed_does_not_fall_back_to_valid_file(tmp_path):
     entity._hass.async_add_executor_job.assert_not_awaited()
 
 
-def test_local_unlock_missing_file_sends_nothing_and_does_not_connect(tmp_path):
+@pytest.mark.parametrize("old_file_exists", [False, True])
+def test_missing_configured_seed_never_looks_for_file_or_connects(tmp_path, old_file_exists):
     entity, path, _, _ = local_unlock_entity(tmp_path)
-    path.unlink()
+    if old_file_exists:
+        path.parent.mkdir()
+        path.write_text(json.dumps(entity._config_entry.options[CONF_DLOCK_SEED]))
+    entity._config_entry.options.clear()
     entity._device.connected = False
-    with patch(f"{CONTROLS}.write_dp", new_callable=AsyncMock) as send:
+    with (
+        patch(f"{CONTROLS}.write_dp", new_callable=AsyncMock) as send,
+        patch("builtins.open", side_effect=AssertionError("File read forbidden")),
+    ):
         with pytest.raises(HomeAssistantError, match="Configurar → Apertura local"):
             asyncio.run(DLOCKUnlockTestButton.async_press(entity))
     send.assert_not_awaited()
     entity._device.reconnect.assert_not_awaited()
+    entity._hass.config.path.assert_not_called()
+    entity._hass.async_add_executor_job.assert_not_awaited()
 
 
 @pytest.mark.parametrize("unit", [1, 2, 3])
-def test_local_unlock_own_file_single_dp71_and_confirmed_result(tmp_path, unit):
+def test_local_unlock_own_configuration_single_dp71_and_confirmed_result(tmp_path, unit):
     entity, _, callbacks, unsubscribe = local_unlock_entity(tmp_path, unit)
     async def send(device, dp, kind, command):
         callbacks[0]([SimpleNamespace(id=71, type=DP.DT_RAW, value=reply_to(command))])
@@ -221,7 +226,7 @@ def test_local_unlock_own_file_single_dp71_and_confirmed_result(tmp_path, unit):
     assert args[:3] == (entity._device, 71, DP.DT_RAW)
     assert args[3] == b"\xff\xff\x00\x05abcdefgh\x01" + (1800000000).to_bytes(4, "big") + b"\x00\x01"
     assert entity._device._dlock_dp71_last_result == {"status": "confirmed", "response_code": 0}
-    entity._hass.async_add_executor_job.assert_awaited_once()
+    entity._hass.async_add_executor_job.assert_not_awaited()
     unsubscribe.assert_called_once()
     assert not entity._device._dlock_command_lock.locked()
 
