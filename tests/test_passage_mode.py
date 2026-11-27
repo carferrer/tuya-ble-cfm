@@ -143,6 +143,7 @@ def code():
         "PRODUCT_B3AOULUH": "b3aouluh",
         "PRODUCT_7A4XVBTT": "7a4xvbtt",
         "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "PRODUCT_99GV5NMZ": "99gv5nmz",
         "PASSAGE_CONNECT_SETTLE_SECONDS": 0.5,
         "PASSAGE_LA_UNLOCK_DELAY_SECONDS": 0.5,
         "build_local_dp71_command": preflight,
@@ -393,6 +394,7 @@ def test_lock_and_passage_switch_platforms_load_for_supported_families():
         "PRODUCT_OKKYFGFS": "okkyfgfs",
         "PRODUCT_7A4XVBTT": "7a4xvbtt",
         "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "PRODUCT_99GV5NMZ": "99gv5nmz",
     }
     exec(compile(ast.Module(body=[fn], type_ignores=[]), "__init__.py", "exec",
                  flags=__import__("__future__").annotations.compiler_flag), ns)
