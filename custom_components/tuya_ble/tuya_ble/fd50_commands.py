@@ -26,6 +26,8 @@ async def write_dp(device, dp_id, dp_type, value: bytes) -> None:
     if not (
         (dp_id == 31 and dp_type == TuyaBLEDataPointType.DT_ENUM
          and value in (b"\x00", b"\x01", b"\x02", b"\x03"))
+        or (dp_id == 33 and dp_type == TuyaBLEDataPointType.DT_BOOL
+            and value in (b"\x00", b"\x01"))
         or (dp_id == 71 and dp_type == TuyaBLEDataPointType.DT_RAW and len(value) == 19)
     ):
         raise ValueError("Unsupported DLOCK-X1 write")

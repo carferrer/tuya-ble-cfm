@@ -508,7 +508,7 @@ def test_dlock_x1_platforms_and_mappings():
     device = SimpleNamespace(category="jtmspro", product_id="99gv5nmz")
     assert get_product_info_by_ids(device.category, device.product_id).name == "DLOCK-X1"
     assert _platforms_for_device(device) == [
-        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT, Platform.SELECT
+        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT, Platform.SELECT, Platform.SWITCH
     ]
     assert button.get_mapping_by_device(device) == []
     assert select.get_mapping_by_device(device) == []
