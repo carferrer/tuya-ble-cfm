@@ -147,7 +147,7 @@ def test_dlock_control_refuses_legacy_products(product):
 @pytest.mark.parametrize("product", ["99gv5nmz", "b3aouluh", "okkyfgfs", "7a4xvbtt", "8gza4o8a"])
 def test_switch_setup_routes_only_dlock_to_new_control(product):
     hass = MagicMock()
-    hass.data = {"tuya_ble": {"entry": SimpleNamespace(device=SimpleNamespace(product_id=product))}}
+    hass.data = {"tuya_ble": {"entry": SimpleNamespace(device=SimpleNamespace(product_id=product, device_id="test-unit"))}}
     added = MagicMock()
     with (
         patch(f"{MODULE}.DLOCKPassageModeSwitch") as dlock,
