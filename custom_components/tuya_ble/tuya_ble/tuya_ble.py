@@ -1271,6 +1271,15 @@ class TuyaBLEDevice:
     ) -> None:
         result: int = 0
 
+        if (
+            getattr(self, "product_id", None) == "99gv5nmz"
+            and code in (TuyaBLECode.FUN_RECEIVE_DP_V4, TuyaBLECode.FUN_RECEIVE_TIME_DP_V4)
+        ):
+            from .fd50_reports import handle_report
+
+            handle_report(self, seq_num, code, data)
+            return
+
         match code:
             case TuyaBLECode.FUN_SENDER_DEVICE_INFO:
                 if len(data) < 46:
