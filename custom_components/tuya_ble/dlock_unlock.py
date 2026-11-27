@@ -64,7 +64,8 @@ def load_seed(path: str, product_id: str, device_id: str, address: str) -> bytes
         return configured_seed(data, product_id, device_id, address)
     except (OSError, UnicodeError, ValueError):
         raise ValueError(
-            "Falta el archivo privado DP71 o no es válido para esta cerradura"
+            "No se ha definido un seed válido para esta cerradura. "
+            "Añádelo en Tuya BLE → Configurar → Apertura local"
         ) from None
 
 

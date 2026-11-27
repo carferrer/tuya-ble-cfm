@@ -200,7 +200,7 @@ def test_local_unlock_missing_file_sends_nothing_and_does_not_connect(tmp_path):
     path.unlink()
     entity._device.connected = False
     with patch(f"{CONTROLS}.write_dp", new_callable=AsyncMock) as send:
-        with pytest.raises(HomeAssistantError, match="archivo privado"):
+        with pytest.raises(HomeAssistantError, match="Configurar → Apertura local"):
             asyncio.run(DLOCKUnlockTestButton.async_press(entity))
     send.assert_not_awaited()
     entity._device.reconnect.assert_not_awaited()

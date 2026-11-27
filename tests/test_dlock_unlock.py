@@ -70,7 +70,7 @@ def test_invalid_or_other_unit_import_never_echoes_values(tmp_path, field, value
     data[field] = value
     path = tmp_path / "private.json"
     path.write_text(json.dumps(data))
-    with pytest.raises(ValueError, match="archivo privado") as err:
+    with pytest.raises(ValueError, match="Configurar → Apertura local") as err:
         unlock.load_seed(str(path), "99gv5nmz", "fictional-unit", ADDRESS)
     assert data["seed"] is None or str(data["seed"]) not in str(err.value)
     assert err.value.__suppress_context__
@@ -80,7 +80,7 @@ def test_invalid_or_other_unit_import_never_echoes_values(tmp_path, field, value
 def test_malformed_private_file_is_redacted(tmp_path, contents):
     path = tmp_path / "private.json"
     path.write_text(contents)
-    with pytest.raises(ValueError, match="archivo privado") as err:
+    with pytest.raises(ValueError, match="Configurar → Apertura local") as err:
         unlock.load_seed(str(path), "99gv5nmz", "fictional-unit", ADDRESS)
     assert "PRIVATE" not in str(err.value)
 
