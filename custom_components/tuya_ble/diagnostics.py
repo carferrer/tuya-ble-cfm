@@ -77,6 +77,11 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
                 getattr(device, "_cfm_dp71_response_history", [])
             ),
         } if device.product_id == "8gza4o8a" else None,
+        "fd50_connection": {
+            "stage": getattr(device, "_fd50_stage", "not_started"),
+            "last_error": getattr(device, "_fd50_last_error", None),
+            "write_capacity": getattr(device, "_fd50_write_size", None),
+        } if device.product_id == "99gv5nmz" else None,
         "record_recovery": {
             "dp69_request_count": int(
                 getattr(device, "_cfm_dp69_request_count", 0)
