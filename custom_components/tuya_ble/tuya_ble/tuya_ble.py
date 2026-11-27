@@ -692,13 +692,26 @@ class TuyaBLEDevice:
             self._expected_disconnect = True
             self._client = None
             if client and client.is_connected:
-                await client.stop_notify(CHARACTERISTIC_NOTIFY)
-                await client.disconnect()
+                if getattr(self, "product_id", None) == "99gv5nmz":
+                    from .fd50 import NOTIFY_UUID
+
+                    try:
+                        await client.stop_notify(NOTIFY_UUID)
+                    finally:
+                        await client.disconnect()
+                else:
+                    await client.stop_notify(CHARACTERISTIC_NOTIFY)
+                    await client.disconnect()
         async with self._seq_num_lock:
             self._current_seq_num = 1
 
     async def _ensure_connected(self) -> None:
         """Ensure connection to device is established."""
+        if getattr(self, "product_id", None) == "99gv5nmz":
+            from .fd50 import ensure_connected
+
+            await ensure_connected(self)
+            return
         if self._expected_disconnect:
             return
         if self._connect_lock.locked():
@@ -838,6 +851,13 @@ class TuyaBLEDevice:
 
     async def _reconnect(self) -> None:
         """Attempt a reconnect"""
+        if getattr(self, "product_id", None) == "99gv5nmz":
+            try:
+                await self._ensure_connected()
+            except BLEAK_EXCEPTIONS:
+                # Connection policy decides when to try again; no recursive task.
+                return
+            return
         _LOGGER.debug("%s: Reconnect, ensuring connection", self.address)
         async with self._seq_num_lock:
             self._current_seq_num = 1
@@ -930,6 +950,9 @@ class TuyaBLEDevice:
         cipher = AES.new(key, AES.MODE_CBC, iv)
         encrypted = security_flag + iv + cipher.encrypt(raw)
 
+        packet_size = GATT_MTU
+        if getattr(self, "product_id", None) == "99gv5nmz":
+            packet_size = getattr(self, "_fd50_write_size", GATT_MTU)
         command = []
         packet_num = 0
         pos = 0
@@ -943,7 +966,7 @@ class TuyaBLEDevice:
                 packet += pack(">B", self._protocol_version << 4)
 
             data_part = encrypted[
-                pos:pos + GATT_MTU - len(packet)  # fmt: skip
+                pos:pos + packet_size - len(packet)  # fmt: skip
             ]
             packet += data_part
             command.append(packet)
@@ -993,6 +1016,10 @@ class TuyaBLEDevice:
         # retry: int | None = None
     ) -> bool:
         """Send packet to device and optional read response."""
+        if getattr(self, "product_id", None) == "99gv5nmz":
+            from .fd50 import send_packet
+
+            return await send_packet(self, code, data, response_to, wait_for_response)
         result = True
         future: asyncio.Future | None = None
         seq_num = await self._get_seq_num()
@@ -1230,7 +1257,7 @@ class TuyaBLEDevice:
                 self.address,
                 id,
                 type.name,
-                "<redacted>" if getattr(self, "product_id", None) == "8gza4o8a" and id in (70, 71) else value,
+                "<redacted>" if getattr(self, "product_id", None) in ("8gza4o8a", "99gv5nmz") and id in (70, 71) else value,
             )
             self._datapoints._update_from_device(
                 id, timestamp, flags, type, value)
@@ -1411,7 +1438,7 @@ class TuyaBLEDevice:
                 _code,
                 response_to,
                 "<redacted>"
-                if getattr(self, "product_id", None) == "8gza4o8a"
+                if getattr(self, "product_id", None) in ("8gza4o8a", "99gv5nmz")
                 else data.hex(),
             )
             return
@@ -1446,7 +1473,7 @@ class TuyaBLEDevice:
         """Reassemble ordered fragments; restart only at a new frame boundary."""
         # LA-T01 DP71 can carry a reusable verification value. Avoid dumping
         # this lock's raw packet fragments into debug logs.
-        if getattr(self, "product_id", None) != "8gza4o8a":
+        if getattr(self, "product_id", None) not in ("8gza4o8a", "99gv5nmz"):
             _LOGGER.debug("%s: Packet received: %s", self.address, data.hex())
 
         pos: int = 0
@@ -1512,7 +1539,7 @@ class TuyaBLEDevice:
                 self.address,
                 dp.id,
                 dp.type.name,
-                "<redacted>" if getattr(self, "product_id", None) == "8gza4o8a" and dp.id in (70, 71) else dp.value,
+                "<redacted>" if getattr(self, "product_id", None) in ("8gza4o8a", "99gv5nmz") and dp.id in (70, 71) else dp.value,
             )
             data += pack(">BBB", dp.id, int(dp.type.value), len(value))
             data += value
