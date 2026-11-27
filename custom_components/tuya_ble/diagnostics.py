@@ -87,6 +87,7 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             "v4_acks_sent": getattr(device, "_fd50_v4_acks_sent", 0),
             "v4_ack_errors": getattr(device, "_fd50_v4_ack_errors", 0),
             "v4_last_report": getattr(device, "_fd50_v4_last_report", None),
+            "v4_rejections": list(getattr(device, "_fd50_v4_rejections", [])),
         } if device.product_id == "99gv5nmz" else None,
         "record_recovery": {
             "dp69_request_count": int(
