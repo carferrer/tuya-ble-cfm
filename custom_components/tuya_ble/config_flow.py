@@ -274,6 +274,10 @@ class TuyaBLEOptionsFlow(OptionsFlowWithConfigEntry):
                 credentials = await manager.get_device_credentials(address, True, True)
                 if credentials:
                     options = dict(manager.data)
+                    if self._dlock_identity() is not None and CONF_DLOCK_SEED in self.config_entry.options:
+                        # A loaded manager may predate a seed saved in options.
+                        # Preserve the current bound record during account edits.
+                        options[CONF_DLOCK_SEED] = self.config_entry.options[CONF_DLOCK_SEED]
                     options[CONF_CONNECTION_MODE] = user_input.get(
                         CONF_CONNECTION_MODE,
                         DEFAULT_CONNECTION_MODE,

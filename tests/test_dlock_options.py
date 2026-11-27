@@ -95,3 +95,15 @@ def test_seed_redacted_from_config_entry_diagnostics():
     assert SEED not in json.dumps(result)
     assert result["options"][CONF_DLOCK_SEED] == "**REDACTED**"
     assert result["entry"]["options"][CONF_DLOCK_SEED] == "**REDACTED**"
+
+
+def test_account_options_preserve_seed_saved_after_manager_loaded():
+    entry = entry_for()
+    manager = SimpleNamespace(data=dict(entry.options), get_device_credentials=AsyncMock(return_value=object()))
+    entry.options[CONF_DLOCK_SEED] = seed_record(SEED, "99gv5nmz", "dlock-1", entry.data["address"])
+    flow = flow_for(entry)
+    flow.hass.data = {"tuya_ble": {entry.entry_id: SimpleNamespace(manager=manager)}}
+    with patch.object(config_flow, "_try_login", AsyncMock(return_value={"username": "fictional"})):
+        result = asyncio.run(flow.async_step_login({"sync_interval_minutes": 120}))
+    assert result["data"][CONF_DLOCK_SEED] == entry.options[CONF_DLOCK_SEED]
+    assert result["data"]["sync_interval_minutes"] == 120
