@@ -29,6 +29,7 @@ PRODUCT_B3AOULUH = "b3aouluh"
 PRODUCT_OKKYFGFS = "okkyfgfs"
 PRODUCT_7A4XVBTT = "7a4xvbtt"
 PRODUCT_8GZA4O8A = "8gza4o8a"
+PRODUCT_99GV5NMZ = "99gv5nmz"
 DP_GET_RECORDS = 69
 DP_GET_RECORDS_REQUEST_ACTION = 0x01
 MOBILE_CENTRAL_ID = b"\xff\xff"
@@ -210,7 +211,7 @@ class TuyaBLECoordinator(DataUpdateCoordinator[None]):
                     "type": datapoint.type.name,
                     "value": (
                         "<redacted>"
-                        if self._device.product_id == PRODUCT_8GZA4O8A
+                        if self._device.product_id in (PRODUCT_8GZA4O8A, PRODUCT_99GV5NMZ)
                         and datapoint.id in (70, 71)
                         else datapoint.value.hex()
                         if isinstance(datapoint.value, bytes)
@@ -306,6 +307,7 @@ devices_database: dict[str, TuyaBLECategoryInfo] = {
         products={
             "b3aouluh": TuyaBLEProductInfo(name="Smart Lock"),
             PRODUCT_8GZA4O8A: TuyaBLEProductInfo(name="LA-T01"),
+            PRODUCT_99GV5NMZ: TuyaBLEProductInfo(name="DLOCK-X1"),
         },
     ),
 }
