@@ -21,6 +21,29 @@ def valid_import():
             "address": ADDRESS, "seed": SEED.hex()}
 
 
+def test_manual_seed_normalizes_and_binds_identity():
+    record = unlock.seed_record("  " + SEED.hex().upper() + "\n", "99gv5nmz", "fictional-unit", ADDRESS.lower())
+    assert record == valid_import()
+    # Simulate persisted options after restarting HA.
+    assert unlock.configured_seed(json.loads(json.dumps(record)), "99gv5nmz", "fictional-unit", ADDRESS) == SEED
+
+
+@pytest.mark.parametrize("value", [None, 123, "", "g" * 22, "00" * 11, "0005" + "11" * 8 + "00"])
+def test_manual_seed_rejects_invalid_input_without_echo(value):
+    with pytest.raises(ValueError) as err:
+        unlock.parse_seed(value)
+    if value:
+        assert str(value) not in str(err.value)
+
+
+@pytest.mark.parametrize("field,value", [("device_id", "different"), ("address", "AA:BB:CC:DD:EE:02"), ("product_id", "7a4xvbtt"), ("version", True)])
+def test_saved_seed_cannot_cross_device_identity(field, value):
+    record = valid_import()
+    record[field] = value
+    with pytest.raises(ValueError):
+        unlock.configured_seed(record, "99gv5nmz", "fictional-unit", ADDRESS)
+
+
 def test_private_import_and_fresh_command_after_reload(tmp_path):
     path = tmp_path / unlock.private_filename(ADDRESS)
     path.write_text(json.dumps(valid_import()), encoding="utf-8-sig")

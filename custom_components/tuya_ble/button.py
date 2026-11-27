@@ -292,7 +292,7 @@ async def async_setup_entry(
     if data.device.product_id == "99gv5nmz":
         from .dlock_controls import DLOCKUnlockTestButton
 
-        entities.append(DLOCKUnlockTestButton(hass, data))
+        entities.append(DLOCKUnlockTestButton(hass, data, entry))
     if data.device.product_id == PRODUCT_8GZA4O8A:
         registry = er.async_get(hass)
         obsolete_dp6 = registry.async_get_entity_id(

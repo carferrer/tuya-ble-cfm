@@ -306,7 +306,8 @@
         "error": {
             "device_not_registered": "Device is not registered in Tuya cloud",
             "invalid_auth": "Invalid authentication",
-            "login_error": "Login error ({code}): {msg}"
+            "login_error": "Login error ({code}): {msg}",
+            "invalid_dlock_seed": "Seed no válido. Introduce los 22 caracteres hexadecimales de esta cerradura."
         },
         "step": {
             "login": {
@@ -318,7 +319,23 @@
                     "username": "Account"
                 },
                 "description": "Refer to the Home Assistant Tuya integration documentation to retrieve the cloud credentials.\n\nEnter your Tuya credentials."
+            },
+            "init": {
+                "menu_options": {
+                    "local_unlock": "Apertura local",
+                    "login": "Cuenta Tuya y conexión"
+                }
+            },
+            "local_unlock": {
+                "title": "Apertura local DLOCK-X1",
+                "description": "Introduce el seed de esta unidad (22 caracteres hexadecimales). HA lo vincula automáticamente a esta cerradura y lo guarda entre reinicios. El campo siempre aparece vacío: déjalo vacío para conservar el valor guardado. Guardarlo no abre la cerradura ni consulta Tuya Cloud.",
+                "data": {
+                    "dlock_dp71_seed": "Seed de apertura local"
+                }
             }
+        },
+        "abort": {
+            "not_dlock": "Esta configuración solo está disponible para DLOCK-X1."
         }
     }
 }

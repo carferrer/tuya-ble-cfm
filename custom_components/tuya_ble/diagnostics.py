@@ -6,8 +6,10 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .dlock_unlock import CONF_DLOCK_SEED
 
 TO_REDACT = {
+    CONF_DLOCK_SEED,
     "username",
     "password",
     "local_key",

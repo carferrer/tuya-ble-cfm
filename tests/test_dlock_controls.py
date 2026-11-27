@@ -11,6 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from custom_components.tuya_ble import button, select
 from custom_components.tuya_ble.dlock_controls import DLOCKUnlockTestButton, DLOCKVolumeSelect
+from custom_components.tuya_ble.dlock_unlock import CONF_DLOCK_SEED, seed_record
 from custom_components.tuya_ble.tuya_ble import fd50, fd50_commands
 from custom_components.tuya_ble.tuya_ble.const import TuyaBLECode, TuyaBLEDataPointType as DP
 from custom_components.tuya_ble.tuya_ble.exceptions import TuyaBLEDeviceError
@@ -155,12 +156,43 @@ def local_unlock_entity(tmp_path, unit=1, seed="0005616263646566676801"):
         config=SimpleNamespace(path=lambda *parts: str(tmp_path.joinpath(*parts))),
         async_add_executor_job=AsyncMock(side_effect=executor),
     )
-    entity = SimpleNamespace(_device=device, _hass=hass)
+    entity = SimpleNamespace(_device=device, _hass=hass, _config_entry=SimpleNamespace(options={}))
     return entity, path, callbacks, unsubscribe
 
 
 def reply_to(command, status=0):
     return command[2:4] + command[:2] + command[4:18] + bytes((status,))
+
+
+@pytest.mark.parametrize("unit", [1, 2, 3])
+def test_configured_seed_opens_without_private_file(tmp_path, unit):
+    entity, path, callbacks, _ = local_unlock_entity(tmp_path, unit)
+    device = entity._device
+    record = seed_record("0005616263646566676801", device.product_id, device.device_id, device.address)
+    entity._config_entry.options[CONF_DLOCK_SEED] = json.loads(json.dumps(record))
+    path.unlink()
+    async def send(device, dp, kind, command):
+        callbacks[0]([SimpleNamespace(id=71, type=DP.DT_RAW, value=reply_to(command))])
+    with patch(f"{CONTROLS}.write_dp", AsyncMock(side_effect=send)) as sender:
+        asyncio.run(DLOCKUnlockTestButton.async_press(entity))
+    sender.assert_awaited_once()
+    assert sender.call_args.args[1] == 71
+    entity._hass.async_add_executor_job.assert_not_awaited()
+    assert device._dlock_dp71_last_result["status"] == "confirmed"
+
+
+def test_invalid_configured_seed_does_not_fall_back_to_valid_file(tmp_path):
+    entity, path, _, _ = local_unlock_entity(tmp_path)
+    record = json.loads(path.read_text())
+    record["device_id"] = "another-unit"
+    entity._config_entry.options[CONF_DLOCK_SEED] = record
+    entity._device.connected = False
+    with patch(f"{CONTROLS}.write_dp", new_callable=AsyncMock) as send:
+        with pytest.raises(HomeAssistantError):
+            asyncio.run(DLOCKUnlockTestButton.async_press(entity))
+    send.assert_not_awaited()
+    entity._device.reconnect.assert_not_awaited()
+    entity._hass.async_add_executor_job.assert_not_awaited()
 
 
 def test_local_unlock_missing_file_sends_nothing_and_does_not_connect(tmp_path):

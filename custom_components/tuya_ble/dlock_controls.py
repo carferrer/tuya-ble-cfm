@@ -12,7 +12,9 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.storage import Store
 
 from .devices import TuyaBLEEntity
-from .dlock_unlock import build_command, load_seed, private_filename, response_result
+from .dlock_unlock import (
+    CONF_DLOCK_SEED, build_command, configured_seed, load_seed, private_filename, response_result,
+)
 from .select import TuyaBLELASelect, TuyaBLESelectMapping
 from .tuya_ble import TuyaBLEDataPointType
 from .tuya_ble.fd50_commands import command_lock, write_dp
@@ -69,7 +71,7 @@ class DLOCKVolumeSelect(TuyaBLELASelect):
 class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
     """Send one local DP71 with this unit's privately imported verification."""
 
-    def __init__(self, hass, data):
+    def __init__(self, hass, data, config_entry):
         super().__init__(
             hass, data.coordinator, data.device, data.product,
             ButtonEntityDescription(
@@ -78,6 +80,7 @@ class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
             ),
             "button",
         )
+        self._config_entry = config_entry
 
     @property
     def available(self):
@@ -88,13 +91,21 @@ class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
             raise HomeAssistantError("Control exclusivo de DLOCK-X1")
         async with command_lock(self._device):
             try:
-                path = self._hass.config.path(
-                    "tuya_ble_private", private_filename(self._device.address)
-                )
-                seed = await self._hass.async_add_executor_job(
-                    load_seed, path, self._device.product_id,
-                    self._device.device_id, self._device.address,
-                )
+                if CONF_DLOCK_SEED in self._config_entry.options:
+                    seed = configured_seed(
+                        self._config_entry.options[CONF_DLOCK_SEED],
+                        self._device.product_id, self._device.device_id, self._device.address,
+                    )
+                else:
+                    # Compatibility with the initial private-file trial. Once
+                    # configured, never fall back to possibly stale verification.
+                    path = self._hass.config.path(
+                        "tuya_ble_private", private_filename(self._device.address)
+                    )
+                    seed = await self._hass.async_add_executor_job(
+                        load_seed, path, self._device.product_id,
+                        self._device.device_id, self._device.address,
+                    )
             except ValueError as err:
                 raise HomeAssistantError(str(err)) from None
             # Generate the timestamp after connection, not before a slow handshake.

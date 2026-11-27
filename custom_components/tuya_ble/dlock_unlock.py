@@ -7,6 +7,38 @@ from pathlib import Path
 import re
 
 PRODUCT_ID = "99gv5nmz"
+CONF_DLOCK_SEED = "dlock_dp71_seed"
+
+
+def parse_seed(value: str) -> bytes:
+    """Validate a manually supplied verification without echoing it in errors."""
+    if not isinstance(value, str) or not re.fullmatch(r"[0-9a-fA-F]{22}", value.strip()):
+        raise ValueError("Seed DP71 no válido")
+    seed = bytes.fromhex(value.strip())
+    build_command(seed, 1)
+    return seed
+
+
+def seed_record(value: str, product_id: str, device_id: str, address: str) -> dict:
+    """Bind manually entered verification to this existing HA device identity."""
+    private_filename(address)
+    if product_id != PRODUCT_ID or not isinstance(device_id, str) or not device_id:
+        raise ValueError("Identidad DLOCK-X1 no válida")
+    return {"version": 1, "product_id": PRODUCT_ID, "device_id": device_id,
+            "address": address.upper(), "seed": parse_seed(value).hex()}
+
+
+def configured_seed(data: dict, product_id: str, device_id: str, address: str) -> bytes:
+    """Refuse verification copied from a different entry or rebound device."""
+    if (
+        product_id != PRODUCT_ID or not device_id or not isinstance(data, dict)
+        or type(data.get("version")) is not int or data["version"] != 1
+        or data.get("product_id") != PRODUCT_ID
+        or data.get("device_id") != device_id
+        or data.get("address") != address.upper()
+    ):
+        raise ValueError("Seed guardado no válido para esta cerradura")
+    return parse_seed(data.get("seed"))
 
 
 def private_filename(address: str) -> str:
@@ -29,19 +61,7 @@ def load_seed(path: str, product_id: str, device_id: str, address: str) -> bytes
         if len(contents) > 4096:
             raise ValueError
         data = json.loads(contents)
-        if (
-            not isinstance(data, dict)
-            or type(data.get("version")) is not int or data["version"] != 1
-            or data.get("product_id") != PRODUCT_ID
-            or not device_id or data.get("device_id") != device_id
-            or data.get("address") != address.upper()
-            or not isinstance(data.get("seed"), str)
-            or not re.fullmatch(r"[0-9a-fA-F]{22}", data["seed"])
-        ):
-            raise ValueError
-        seed = bytes.fromhex(data["seed"])
-        build_command(seed, 1)
-        return seed
+        return configured_seed(data, product_id, device_id, address)
     except (OSError, UnicodeError, ValueError):
         raise ValueError(
             "Falta el archivo privado DP71 o no es válido para esta cerradura"
