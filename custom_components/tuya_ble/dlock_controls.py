@@ -74,7 +74,7 @@ class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
             hass, data.coordinator, data.device, data.product,
             ButtonEntityDescription(
                 key="bluetooth_unlock_dp71_test",
-                name="Prueba abrir DP71 local",
+                name="Abrir cerradura",
             ),
             "button",
         )
