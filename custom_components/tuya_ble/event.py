@@ -30,6 +30,7 @@ from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
     PRODUCT_8GZA4O8A,
+    PRODUCT_99GV5NMZ,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
@@ -242,6 +243,7 @@ async def async_setup_entry(
         PRODUCT_OKKYFGFS,
         PRODUCT_7A4XVBTT,
         PRODUCT_8GZA4O8A,
+        PRODUCT_99GV5NMZ,
     ):
         return
 
