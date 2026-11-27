@@ -192,3 +192,60 @@ def test_ack_cannot_be_sent_on_a_replacement_session():
         new_client.write_gatt_char.assert_not_awaited()
         assert device._fd50_v4_ack_errors == 1
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("payload,reason,metadata", [
+    (HEADER[:6], "truncated_report_header", {"remaining": 6}),
+    (b"\x01" + HEADER[1:] + dp(8, 2, pack(">i", 1)),
+     "unsupported_header_version", {"header_version": 1}),
+    (HEADER + dp(12, 2, b"\x00\x64"),
+     "invalid_value_length", {"dp_id": 12, "dp_type": 2, "declared_length": 2}),
+    (HEADER + dp(47, 1, b"\x02"),
+     "invalid_bool_encoding", {"dp_id": 47, "dp_type": 1, "declared_length": 1}),
+    (HEADER + b"\x08\x02\x00\x04\x00",
+     "truncated_dp_value", {"dp_id": 8, "dp_type": 2, "declared_length": 4, "remaining": 1}),
+])
+def test_rejection_metadata_identifies_structure_without_values(payload, reason, metadata):
+    with pytest.raises((TuyaBLEDataLengthError, TuyaBLEDataFormatError)) as caught:
+        reports.parse_report(LIVE, payload, 1)
+    details = caught.value.report_details
+    assert details["reason"] == reason
+    assert all(details[key] == value for key, value in metadata.items())
+    assert "value" not in details
+    assert "payload" not in details
+
+
+def test_rejection_history_is_bounded_private_and_survives_valid_report(caplog):
+    async def run():
+        device = make_device()
+        secret = b"private-credential-123"
+        # Earlier valid raw DP must not be published or copied into diagnostics
+        # when a later DP fails validation.
+        payload = HEADER + dp(70, 0, secret) + dp(71, 3, b"\xff" + secret)
+        caplog.set_level("DEBUG")
+        with patch.object(reports, "send_packet", AsyncMock()) as sender:
+            for seq in range(25):
+                with pytest.raises(TuyaBLEDataFormatError):
+                    reports.handle_report(device, seq, LIVE, payload)
+            assert len(device._fd50_v4_rejections) == 20
+            assert device._fd50_v4_rejections[-1]["dp_id"] == 71
+            assert device._fd50_v4_rejections[-1]["reason"] == "invalid_string_encoding"
+            assert len(device.datapoints) == 0
+            sender.assert_not_awaited()
+            no_ack_header = HEADER[:5] + b"\x80\x00"
+            reports.handle_report(device, 30, LIVE, no_ack_header + dp(47, 1, b"\x00"))
+            await drain(device)
+        assert device._fd50_v4_last_report["valid"]
+        assert len(device._fd50_v4_rejections) == 20
+        combined = str(device._fd50_v4_rejections) + caplog.text
+        assert secret.decode() not in combined
+        assert secret.hex() not in combined
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("product", ["b3aouluh", "okkyfgfs", "7a4xvbtt", "8gza4o8a"])
+def test_direct_report_diagnostics_are_dlock_only(product):
+    device = make_device(product)
+    reports.handle_report(device, 1, LIVE, b"")
+    assert not hasattr(device, "_fd50_v4_rejections")
+    assert not hasattr(device, "_fd50_v4_received")
