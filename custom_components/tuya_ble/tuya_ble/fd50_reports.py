@@ -28,72 +28,94 @@ class Report:
     datapoints: tuple
 
 
+def _reject(error_type, reason: str, offset: int, **metadata):
+    """Attach only explicit structural fields; never include raw DP values."""
+    error = error_type()
+    error.report_details = {"reason": reason, "offset": offset, **metadata}
+    raise error
+
+
 def parse_report(code: TuyaBLECode, data: bytes, received_at: float) -> Report:
     """Validate the entire SDK V4 payload before making any state changes."""
     if code not in (TuyaBLECode.FUN_RECEIVE_DP_V4, TuyaBLECode.FUN_RECEIVE_TIME_DP_V4):
-        raise TuyaBLEDataFormatError()
+        _reject(TuyaBLEDataFormatError, "unsupported_command", 0)
     if len(data) < 7:
-        raise TuyaBLEDataLengthError()
-    if data[0] != 0 or data[5] not in (0, 1, 128, 129) or data[6] > 3:
-        raise TuyaBLEDataFormatError()
+        _reject(TuyaBLEDataLengthError, "truncated_report_header", 0, remaining=len(data))
+    if data[0] != 0:
+        _reject(TuyaBLEDataFormatError, "unsupported_header_version", 0, header_version=data[0])
+    if data[5] not in (0, 1, 128, 129):
+        _reject(TuyaBLEDataFormatError, "unsupported_report_flags", 5, report_flags=data[5])
+    if data[6] > 3:
+        _reject(TuyaBLEDataFormatError, "unsupported_report_mode", 6, report_mode=data[6])
     timestamp = received_at
     pos = 7
     if code == TuyaBLECode.FUN_RECEIVE_TIME_DP_V4:
         if len(data) < 8:
-            raise TuyaBLEDataLengthError()
+            _reject(TuyaBLEDataLengthError, "missing_timestamp_type", 7)
         time_type = data[7]
         if time_type == 1:
             pos = 12
             if len(data) < pos:
-                raise TuyaBLEDataLengthError()
+                _reject(TuyaBLEDataLengthError, "truncated_timestamp", 8,
+                        timestamp_type=time_type, remaining=len(data) - 8)
             timestamp = float(int.from_bytes(data[8:12], "big"))
         elif time_type == 0:
             pos = 21
             if len(data) < pos:
-                raise TuyaBLEDataLengthError()
+                _reject(TuyaBLEDataLengthError, "truncated_timestamp", 8,
+                        timestamp_type=time_type, remaining=len(data) - 8)
             raw_time = data[8:21]
             if any(byte < 48 or byte > 57 for byte in raw_time):
-                raise TuyaBLEDataFormatError()
+                _reject(TuyaBLEDataFormatError, "invalid_timestamp_digits", 8)
             timestamp = int(raw_time) / 1000
         else:
-            raise TuyaBLEDataFormatError()
+            _reject(TuyaBLEDataFormatError, "unsupported_timestamp_type", 7,
+                    timestamp_type=time_type)
     if pos == len(data):
-        raise TuyaBLEDataLengthError()
+        _reject(TuyaBLEDataLengthError, "missing_datapoints", pos)
     parsed = []
     while pos < len(data):
         if len(data) - pos < 4:
-            raise TuyaBLEDataLengthError()
+            _reject(TuyaBLEDataLengthError, "truncated_dp_header", pos,
+                    remaining=len(data) - pos)
         dp_id, raw_type = data[pos:pos + 2]
         length = int.from_bytes(data[pos + 2:pos + 4], "big")
+        metadata = {
+            "dp_id": dp_id, "dp_type": raw_type, "declared_length": length,
+            "remaining": len(data) - pos - 4,
+        }
+        dp_offset = pos
         pos += 4
         if pos + length > len(data):
-            raise TuyaBLEDataLengthError()
+            _reject(TuyaBLEDataLengthError, "truncated_dp_value", dp_offset, **metadata)
         try:
             dp_type = TuyaBLEDataPointType(raw_type)
-        except ValueError as err:
-            raise TuyaBLEDataFormatError() from err
+        except ValueError:
+            _reject(TuyaBLEDataFormatError, "unknown_dp_type", dp_offset, **metadata)
         raw = data[pos:pos + length]
         pos += length
         if dp_type == TuyaBLEDataPointType.DT_BOOL:
-            if length != 1 or raw[0] not in (0, 1):
-                raise TuyaBLEDataFormatError()
+            if length != 1:
+                _reject(TuyaBLEDataFormatError, "invalid_bool_length", dp_offset, **metadata)
+            if raw[0] not in (0, 1):
+                _reject(TuyaBLEDataFormatError, "invalid_bool_encoding", dp_offset, **metadata)
             value = bool(raw[0])
         elif dp_type == TuyaBLEDataPointType.DT_VALUE:
             if length != 4:
-                raise TuyaBLEDataFormatError()
+                _reject(TuyaBLEDataFormatError, "invalid_value_length", dp_offset, **metadata)
             value = int.from_bytes(raw, "big", signed=True)
         elif dp_type == TuyaBLEDataPointType.DT_ENUM:
             if length != 1:
-                raise TuyaBLEDataFormatError()
+                _reject(TuyaBLEDataFormatError, "invalid_enum_length", dp_offset, **metadata)
             value = raw[0]
         elif dp_type == TuyaBLEDataPointType.DT_STRING:
             try:
                 value = raw.decode("utf-8")
-            except UnicodeError as err:
-                raise TuyaBLEDataFormatError() from err
+            except UnicodeError:
+                _reject(TuyaBLEDataFormatError, "invalid_string_encoding", dp_offset, **metadata)
         else:
             if dp_type == TuyaBLEDataPointType.DT_BITMAP and length not in (1, 2, 4):
-                raise TuyaBLEDataFormatError()
+                _reject(TuyaBLEDataFormatError, "invalid_bitmap_length", dp_offset, **metadata)
             value = raw
         parsed.append((dp_id, dp_type, value))
     # Preserve mode as the existing event pipeline's flags field.
@@ -128,13 +150,25 @@ async def _acknowledge(device, client, code, payload, seq_num):
 
 def handle_report(device, seq_num: int, code: TuyaBLECode, data: bytes) -> None:
     """Publish validated records in order, then acknowledge if requested."""
+    if getattr(device, "product_id", None) != "99gv5nmz":
+        return
     _increment(device, "_fd50_v4_received")
     try:
         report = parse_report(code, data, time.time())
-    except (TuyaBLEDataLengthError, TuyaBLEDataFormatError):
+    except (TuyaBLEDataLengthError, TuyaBLEDataFormatError) as err:
         _increment(device, "_fd50_v4_rejected")
         # Only structural metadata: never store raw packets or credential DPs.
-        device._fd50_v4_last_report = {"code": code.name, "length": len(data), "valid": False}
+        rejection = {
+            "code": code.name, "length": len(data), "valid": False,
+            "received_at": time.time(),
+            **getattr(err, "report_details", {"reason": "invalid_report"}),
+        }
+        device._fd50_v4_last_report = rejection
+        history = getattr(device, "_fd50_v4_rejections", None)
+        if history is None:
+            history = device._fd50_v4_rejections = deque(maxlen=20)
+        history.append(rejection)
+        _LOGGER.debug("%s: V4 report rejected: %s", device.address, rejection)
         raise
     device._fd50_v4_last_report = {
         "code": code.name, "length": len(data), "valid": True,
