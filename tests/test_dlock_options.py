@@ -24,7 +24,15 @@ def entry_for(unit=1, product="99gv5nmz"):
 
 
 def flow_for(entry):
-    flow = config_flow.TuyaBLEOptionsFlow(entry)
+    # The existing base class reports deprecation through HA's frame helper.
+    # These focused tests run without a full HA instance; only suppress that
+    # reporting hook, leaving the constructor and flow behavior real.
+    with patch("homeassistant.config_entries.report_usage"):
+        flow = config_flow.TuyaBLEOptionsFlow(entry)
+    flow.handler = entry.entry_id
+    flow.hass = SimpleNamespace(config_entries=SimpleNamespace(
+        async_get_known_entry=lambda entry_id: entry,
+    ))
     flow.async_show_menu = MagicMock(side_effect=lambda **kw: kw)
     flow.async_show_form = MagicMock(side_effect=lambda **kw: kw)
     flow.async_create_entry = MagicMock(side_effect=lambda **kw: kw)
