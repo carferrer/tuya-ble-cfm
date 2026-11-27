@@ -80,7 +80,7 @@ def test_all_types_and_raw_larger_than_255():
     HEADER[:5] + b"\x02\x00" + dp(9, 4, b"\x00"),
     HEADER[:5] + b"\x00\x04" + dp(9, 4, b"\x00"),
     HEADER + b"\x08\x02\x00",
-    HEADER + dp(8, 2, b"\x00"),
+    HEADER + dp(13, 2, b"\x00"),
     HEADER + dp(47, 1, b"\x02"),
     HEADER + dp(47, 1, b""),
     HEADER + dp(21, 4, b"\x00\x00"),
@@ -249,3 +249,38 @@ def test_direct_report_diagnostics_are_dlock_only(product):
     reports.handle_report(device, 1, LIVE, b"")
     assert not hasattr(device, "_fd50_v4_rejections")
     assert not hasattr(device, "_fd50_v4_received")
+
+
+@pytest.mark.parametrize("dp_id", [8, 12])
+@pytest.mark.parametrize("value", [0, 52, 100, 127, 128, 200, 255])
+def test_dlock_observed_uint8_values_are_unsigned(dp_id, value):
+    result = reports.parse_report(LIVE, HEADER + dp(dp_id, 2, bytes([value])), 1)
+    assert result.datapoints[0][2] == value
+
+
+@pytest.mark.parametrize("dp_id", [8, 12])
+@pytest.mark.parametrize("raw", [b"", b"\x00\x01", b"\x00\x00\x01"])
+def test_other_compact_lengths_remain_rejected(dp_id, raw):
+    with pytest.raises(TuyaBLEDataFormatError):
+        reports.parse_report(LIVE, HEADER + dp(dp_id, 2, raw), 1)
+
+
+def test_compact_battery_and_access_reach_callbacks_and_ack():
+    async def run():
+        device = make_device()
+        observed = []
+        device.register_callback(
+            lambda values: observed.extend((v.id, v.value) for v in values)
+        )
+        payload = HEADER + dp(8, 2, b"\x34") + dp(12, 2, b"\xc8")
+        with patch.object(reports, "send_packet", AsyncMock()) as sender:
+            for packet in device._build_packets(1, LIVE, payload):
+                device._notification_handler(None, bytearray(packet))
+            await drain(device)
+            sender.assert_awaited_once_with(
+                device, LIVE, HEADER + b"\x00", 1, False, expected_client=device._client
+            )
+        assert observed == [(8, 52), (12, 200)]
+        assert device._fd50_v4_parsed == 1
+        assert not getattr(device, "_fd50_v4_rejected", 0)
+    asyncio.run(run())
