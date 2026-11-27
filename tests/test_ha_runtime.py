@@ -501,3 +501,59 @@ def test_percentage_battery_restores_and_updates(level):
         entity._device.datapoints[8].value = invalid
         entity._handle_coordinator_update()
         assert entity.native_value == 42
+
+
+def test_dlock_x1_report_only_platforms_and_mappings():
+    """Do not infer writable protocols from cloud property names."""
+    device = SimpleNamespace(category="jtmspro", product_id="99gv5nmz")
+    assert get_product_info_by_ids(device.category, device.product_id).name == "DLOCK-X1"
+    assert _platforms_for_device(device) == [
+        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT
+    ]
+    assert button.get_mapping_by_device(device) == []
+    assert select.get_mapping_by_device(device) == []
+    assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 9, 21}
+    assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
+
+
+def test_three_dlock_units_keep_entities_and_event_storage_separate():
+    """Same product must not share device IDs, event history or battery storage."""
+    from custom_components.tuya_ble import event
+    from custom_components.tuya_ble.devices import TuyaBLEData
+
+    hass = MagicMock()
+    coordinator = MagicMock()
+    product = get_product_info_by_ids("jtmspro", "99gv5nmz")
+    refresh_buttons = []
+    access_events = []
+    batteries = []
+    with (
+        patch("custom_components.tuya_ble.devices.generate_entity_id",
+              side_effect=lambda fmt, uid, **kwargs: fmt.format(uid)),
+        patch.object(event, "Store") as event_store,
+        patch.object(sensor, "Store") as battery_store,
+    ):
+        for index in range(3):
+            device = MagicMock()
+            device.category = "jtmspro"
+            device.product_id = "99gv5nmz"
+            device.device_id = f"dlock-unit-{index}"
+            device.address = f"DC:23:52:F5:7D:{86 + index:02X}"
+            entry = SimpleNamespace(entry_id=f"dlock-entry-{index}")
+            data = TuyaBLEData("DLOCK", device, product, MagicMock(), coordinator)
+            refresh_buttons.append(button.TuyaBLERefreshButton(hass, data))
+            access_events.append(event.TuyaBLEAccessEvent(hass, entry, device))
+            battery_mapping = next(
+                item for item in sensor.get_mapping_by_device(device) if item.dp_id == 8
+            )
+            batteries.append(sensor.TuyaBLEBatterySensor(
+                hass, entry, coordinator, device, product, battery_mapping
+            ))
+        assert len({call.args[2] for call in event_store.call_args_list}) == 3
+        assert len({call.args[2] for call in battery_store.call_args_list}) == 3
+    for entities in (refresh_buttons, access_events, batteries):
+        assert len({entity.unique_id for entity in entities}) == 3
+        assert len({next(iter(entity.device_info["identifiers"])) for entity in entities}) == 3
+    access_events[0]._seen_set.add("first-lock-record")
+    assert not access_events[1]._seen_set
+    assert not access_events[2]._seen_set
