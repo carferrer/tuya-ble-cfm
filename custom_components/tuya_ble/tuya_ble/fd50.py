@@ -123,6 +123,11 @@ async def send_packet(device, code, data, response_to, wait_for_response, *, exp
     future = asyncio.get_running_loop().create_future() if wait_for_response else None
     if future is not None:
         device._input_expected_responses[seq] = future
+    headers = getattr(device, "_fd50_write_headers", None)
+    if headers is None:
+        headers = device._fd50_write_headers = {}
+    if code == TuyaBLECode.FUN_SENDER_DPS_V4 and future is not None:
+        headers[seq] = bytes(data[:5])
     try:
         packets = device._build_packets(seq, code, data, response_to)
         async with device._operation_lock:
@@ -137,6 +142,7 @@ async def send_packet(device, code, data, response_to, wait_for_response, *, exp
             await asyncio.wait_for(future, RESPONSE_TIMEOUT)
         return True
     finally:
+        headers.pop(seq, None)
         device._input_expected_responses.pop(seq, None)
         if future is not None and not future.done():
             future.cancel()

@@ -503,12 +503,12 @@ def test_percentage_battery_restores_and_updates(level):
         assert entity.native_value == 42
 
 
-def test_dlock_x1_report_only_platforms_and_mappings():
-    """Do not infer writable protocols from cloud property names."""
+def test_dlock_x1_platforms_and_mappings():
+    """Only DLOCK gains its isolated experimental controls."""
     device = SimpleNamespace(category="jtmspro", product_id="99gv5nmz")
     assert get_product_info_by_ids(device.category, device.product_id).name == "DLOCK-X1"
     assert _platforms_for_device(device) == [
-        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT
+        Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT, Platform.SELECT
     ]
     assert button.get_mapping_by_device(device) == []
     assert select.get_mapping_by_device(device) == []

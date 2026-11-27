@@ -1273,6 +1273,15 @@ class TuyaBLEDevice:
 
         if (
             getattr(self, "product_id", None) == "99gv5nmz"
+            and code == TuyaBLECode.FUN_SENDER_DPS_V4
+        ):
+            from .fd50_commands import handle_write_response
+
+            handle_write_response(self, response_to, data)
+            return
+
+        if (
+            getattr(self, "product_id", None) == "99gv5nmz"
             and code in (TuyaBLECode.FUN_RECEIVE_DP_V4, TuyaBLECode.FUN_RECEIVE_TIME_DP_V4)
         ):
             from .fd50_reports import handle_report
