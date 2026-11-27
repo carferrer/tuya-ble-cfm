@@ -39,6 +39,15 @@ from .devices import (
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
 
 
+# Actual DP33 value that enables passage mode for each supported family.
+PASSAGE_MODE_ENABLED_VALUE = {
+    PRODUCT_B3AOULUH: True,
+    PRODUCT_7A4XVBTT: False,
+    PRODUCT_8GZA4O8A: False,
+    PRODUCT_99GV5NMZ: False,
+}
+
+
 class TuyaBLEAccessEvent(EventEntity):
     """Expose lock access records as Home Assistant events."""
 
@@ -65,7 +74,7 @@ class TuyaBLEAccessEvent(EventEntity):
         self._queued_records: list[dict[str, Any]] = []
         self._passage_mode: bool | None = None
         self._pending_passage_open = False
-        if device.product_id != PRODUCT_B3AOULUH:
+        if device.product_id not in PASSAGE_MODE_ENABLED_VALUE:
             self._attr_event_types = [
                 event_type
                 for event_type in ACCESS_EVENT_TYPES
@@ -146,14 +155,16 @@ class TuyaBLEAccessEvent(EventEntity):
         """Handle live or replayed access datapoints from the BLE transport."""
         for datapoint in updates:
             if (
-                self._device.product_id == PRODUCT_B3AOULUH
+                self._device.product_id in PASSAGE_MODE_ENABLED_VALUE
                 and datapoint.id == DP_PASSAGE_MODE
                 and datapoint.type == TuyaBLEDataPointType.DT_BOOL
                 and type(datapoint.value) is bool
             ):
                 was_enabled = self._passage_mode
-                self._passage_mode = datapoint.value
-                if was_enabled is False and datapoint.value:
+                self._passage_mode = (
+                    datapoint.value is PASSAGE_MODE_ENABLED_VALUE[self._device.product_id]
+                )
+                if was_enabled is False and self._passage_mode:
                     if self._ready:
                         self._emit_passage_mode_enabled()
                     else:
@@ -173,11 +184,14 @@ class TuyaBLEAccessEvent(EventEntity):
         self.async_on_remove(self._device.register_callback(self._handle_updates))
         passage_dp = self._device.datapoints[DP_PASSAGE_MODE]
         if (
-            passage_dp is not None
+            self._device.product_id in PASSAGE_MODE_ENABLED_VALUE
+            and passage_dp is not None
             and passage_dp.type == TuyaBLEDataPointType.DT_BOOL
             and type(passage_dp.value) is bool
         ):
-            self._passage_mode = passage_dp.value
+            self._passage_mode = (
+                passage_dp.value is PASSAGE_MODE_ENABLED_VALUE[self._device.product_id]
+            )
 
         stored = await self._store.async_load()
         history = list(

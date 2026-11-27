@@ -30,6 +30,7 @@ EXPECTED = [
 
 
 class DPType(Enum):
+    DT_BOOL = 1
     DT_ENUM = 4
     DT_VALUE = 2
 
@@ -90,6 +91,10 @@ def load_code(filename, namespace):
 def code():
     ns = {
         "DOMAIN": "tuya_ble",
+        "PRODUCT_B3AOULUH": "b3aouluh",
+        "PRODUCT_7A4XVBTT": "7a4xvbtt",
+        "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "PRODUCT_99GV5NMZ": "99gv5nmz",
         "TuyaBLEDataPointType": DPType,
         "EventEntity": FakeEvent,
         "Store": FakeStore,
