@@ -17,6 +17,12 @@ Consolidado en `main`:
 
 Se han probado físicamente la recuperación de varias aperturas, los accesos por huella y código, las alarmas de huella/código incorrectos y los avisos por Pushover con `event_type_id`. Los demás tipos están implementados y cubiertos por pruebas automáticas, pero todavía requieren validación física.
 
+## DLOCK-X1: incorporación inicial
+
+El producto `jtmspro/99gv5nmz` carga con botón «Actualizar cerradura», sensores de batería DP8 y DP9, alarma DP21, motor DP47, cierre automático DP33, conexión y eventos de acceso/alarma. Cada unidad conserva sus identificadores e historial por dispositivo/entrada; no se fija ninguna MAC en el código. Los dos datos de batería se muestran por separado hasta confirmar qué informa el equipo real.
+
+Esta fase es de lectura: no expone apertura, modo paso libre ni volumen. El listado de propiedades declara DP70/71, pero todavía no se ha validado su protocolo de apertura en este modelo. No se envían DP6, DP33 ni DP71 como parte del alta o de la actualización manual. Los valores DP70/71 se ocultan en diagnósticos e historial de informes. Tras instalar, actualizar y descargar diagnóstico para validar los informes reales; la recuperación de eventos pendientes queda por comprobar físicamente.
+
 ## Cerraduras compatibles
 
 | Product ID | Modelo / categoría | Funciones básicas | Eventos Access / Alarm events y recuperación DP69 |
