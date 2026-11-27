@@ -41,7 +41,7 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
                 "type": datapoint.type.name,
                 "value": (
                     "<redacted>"
-                    if device.product_id == "8gza4o8a" and dp_id in (70, 71)
+                    if device.product_id in ("8gza4o8a", "99gv5nmz") and dp_id in (70, 71)
                     else _serialize_value(datapoint.value)
                 ),
                 "timestamp": datapoint.timestamp,
