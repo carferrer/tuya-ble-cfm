@@ -38,6 +38,7 @@ from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
     PRODUCT_8GZA4O8A,
+    PRODUCT_99GV5NMZ,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
@@ -103,6 +104,19 @@ mapping = {
         ]
     },
     "jtmspro": {
+        PRODUCT_99GV5NMZ: [
+            alarm_mapping(),
+            TuyaBLEBatteryMapping(dp_id=8),
+            TuyaBLESensorMapping(
+                dp_id=9,
+                description=SensorEntityDescription(
+                    key="battery_state",
+                    device_class=SensorDeviceClass.ENUM,
+                    entity_category=EntityCategory.DIAGNOSTIC,
+                    options=["high", "medium", "low"],
+                ),
+            ),
+        ],
         PRODUCT_8GZA4O8A: [
             alarm_mapping(),
             TuyaBLEBatteryMapping(dp_id=8),
@@ -673,6 +687,7 @@ async def async_setup_entry(
         PRODUCT_OKKYFGFS,
         PRODUCT_7A4XVBTT,
         PRODUCT_8GZA4O8A,
+        PRODUCT_99GV5NMZ,
     ):
         entities.append(TuyaBLELastAccessSensor(hass, entry, data.device))
     async_add_entities(entities)
