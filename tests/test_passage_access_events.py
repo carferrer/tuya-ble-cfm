@@ -134,3 +134,18 @@ def test_confirmed_transition_during_async_store_load_is_emitted_once(product, e
     assert len(entity.emitted) == 1
     entity._handle_updates([dp(enabled)])
     assert len(entity.emitted) == 1
+
+
+@pytest.mark.parametrize("product,enabled", FAMILIES)
+@pytest.mark.parametrize("saved_enabled", [False, True])
+def test_confirmed_saved_baseline_wins_over_cache_without_emitting_on_restore(
+    product, enabled, saved_enabled,
+):
+    saved_value = enabled if saved_enabled else not enabled
+    entity = make_event(product, not saved_value)
+    entity._device._cfm_lock_state = SimpleNamespace(get=lambda dp_id: saved_value)
+    asyncio.run(entity.async_added_to_hass())
+    assert entity._passage_mode is saved_enabled
+    assert not entity.emitted
+    entity._handle_updates([dp(enabled), dp(enabled)])
+    assert len(entity.emitted) == (0 if saved_enabled else 1)

@@ -182,16 +182,24 @@ class TuyaBLEAccessEvent(EventEntity):
         """Load deduplication state and subscribe to Tuya BLE records."""
         await super().async_added_to_hass()
         self.async_on_remove(self._device.register_callback(self._handle_updates))
-        passage_dp = self._device.datapoints[DP_PASSAGE_MODE]
-        if (
-            self._device.product_id in PASSAGE_MODE_ENABLED_VALUE
-            and passage_dp is not None
-            and passage_dp.type == TuyaBLEDataPointType.DT_BOOL
-            and type(passage_dp.value) is bool
-        ):
-            self._passage_mode = (
-                passage_dp.value is PASSAGE_MODE_ENABLED_VALUE[self._device.product_id]
-            )
+        if self._device.product_id in PASSAGE_MODE_ENABLED_VALUE:
+            lock_state = getattr(self._device, "_cfm_lock_state", None)
+            if lock_state is not None:
+                # Same confirmed baseline as the passage switch, without
+                # treating restoration itself as a transition or a write.
+                passage_value = lock_state.get(DP_PASSAGE_MODE)
+            else:
+                passage_dp = self._device.datapoints[DP_PASSAGE_MODE]
+                passage_value = (
+                    passage_dp.value
+                    if passage_dp is not None
+                    and passage_dp.type == TuyaBLEDataPointType.DT_BOOL
+                    else None
+                )
+            if type(passage_value) is bool:
+                self._passage_mode = (
+                    passage_value is PASSAGE_MODE_ENABLED_VALUE[self._device.product_id]
+                )
 
         stored = await self._store.async_load()
         history = list(
