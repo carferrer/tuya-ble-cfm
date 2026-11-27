@@ -49,6 +49,7 @@ async def ensure_connected(device) -> None:
         device._session_key = None
         device._is_paired = False
         device._clean_input()
+        device._fd50_v4_seen = None
         async with device._seq_num_lock:
             device._current_seq_num = 1
         try:
@@ -116,7 +117,7 @@ async def ensure_connected(device) -> None:
         device._fire_connection_status_callbacks()
 
 
-async def send_packet(device, code, data, response_to, wait_for_response):
+async def send_packet(device, code, data, response_to, wait_for_response, *, expected_client=None):
     """Send via FD50 with bounded response waits and no background retry loop."""
     seq = await device._get_seq_num()
     future = asyncio.get_running_loop().create_future() if wait_for_response else None
@@ -126,6 +127,8 @@ async def send_packet(device, code, data, response_to, wait_for_response):
         packets = device._build_packets(seq, code, data, response_to)
         async with device._operation_lock:
             client = device._client
+            if expected_client is not None and client is not expected_client:
+                raise BleakError("DLOCK-X1: report belongs to an earlier BLE session")
             if client is None or not client.is_connected:
                 raise BleakError("DLOCK-X1: disconnected before FD50 write")
             for packet in packets:
