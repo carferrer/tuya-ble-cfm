@@ -101,9 +101,9 @@ def parse_report(code: TuyaBLECode, data: bytes, received_at: float) -> Report:
                 _reject(TuyaBLEDataFormatError, "invalid_bool_encoding", dp_offset, **metadata)
             value = bool(raw[0])
         elif dp_type == TuyaBLEDataPointType.DT_VALUE:
-            # DLOCK hardware reports DP8 battery and DP12 member ID as uint8.
+            # DLOCK hardware reports DP8 battery and DP12/19 access as uint8.
             # Keep standard int32 support and reject other compact encodings.
-            if length == 1 and dp_id in (8, 12):
+            if length == 1 and dp_id in (8, 12, 19):
                 value = raw[0]
             elif length == 4:
                 value = int.from_bytes(raw, "big", signed=True)

@@ -12,12 +12,13 @@ from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.storage import Store
 
 from .devices import TuyaBLEEntity
-from .la_t01_unlock import build_dp71_unlock
+from .dlock_unlock import build_command, load_seed, private_filename, response_result
 from .select import TuyaBLELASelect, TuyaBLESelectMapping
 from .tuya_ble import TuyaBLEDataPointType
 from .tuya_ble.fd50_commands import command_lock, write_dp
 
 VOLUME_TIMEOUT = 10
+UNLOCK_TIMEOUT = 15
 VOLUME_MAPPING = TuyaBLESelectMapping(
     dp_id=31,
     description=SelectEntityDescription(
@@ -66,18 +67,17 @@ class DLOCKVolumeSelect(TuyaBLELASelect):
 
 
 class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
-    """Attempt DP71 only when this device has a compatible successful report."""
+    """Send one local DP71 with this unit's privately imported verification."""
 
     def __init__(self, hass, data):
         super().__init__(
             hass, data.coordinator, data.device, data.product,
             ButtonEntityDescription(
                 key="bluetooth_unlock_dp71_test",
-                name="Prueba abrir DP71 (Tuya Cloud)",
+                name="Prueba abrir DP71 local",
             ),
             "button",
         )
-        self._manager = data.manager
 
     @property
     def available(self):
@@ -88,15 +88,67 @@ class DLOCKUnlockTestButton(TuyaBLEEntity, ButtonEntity):
             raise HomeAssistantError("Control exclusivo de DLOCK-X1")
         async with command_lock(self._device):
             try:
-                properties = await self._manager.get_lock_unlock_properties(
-                    self._device.device_id
+                path = self._hass.config.path(
+                    "tuya_ble_private", private_filename(self._device.address)
                 )
-                # Reuse the strict format validator, not LA-T01's BLE/control path.
-                # DLOCK compatibility is experimental; never invent a missing seed.
-                command = build_dp71_unlock(properties, int(time.time()))
+                seed = await self._hass.async_add_executor_job(
+                    load_seed, path, self._device.product_id,
+                    self._device.device_id, self._device.address,
+                )
             except ValueError as err:
+                raise HomeAssistantError(str(err)) from None
+            # Generate the timestamp after connection, not before a slow handshake.
+            if not self._device.connected:
+                await self._device.reconnect()
+                if not self._device.connected:
+                    raise HomeAssistantError("No se pudo conectar con DLOCK-X1")
+                await asyncio.sleep(0.5)
+            command = build_command(seed, int(time.time()))
+            client = self._device._client
+            confirmation = asyncio.get_running_loop().create_future()
+
+            def on_report(datapoints):
+                if confirmation.done() or self._device._client is not client:
+                    return
+                for datapoint in datapoints:
+                    if datapoint.id != 71 or datapoint.type != TuyaBLEDataPointType.DT_RAW:
+                        continue
+                    result = response_result(command, datapoint.value)
+                    if result is not None:
+                        confirmation.set_result(result)
+                        return
+
+            unsubscribe = self._device.register_callback(on_report)
+            self._device._dlock_dp71_last_result = {"status": "pending"}
+            try:
+                await write_dp(self._device, 71, TuyaBLEDataPointType.DT_RAW, command)
+                result = await asyncio.wait_for(confirmation, UNLOCK_TIMEOUT)
+                self._device._dlock_dp71_last_result = {
+                    "status": "confirmed" if result == 0 else "rejected",
+                    "response_code": result,
+                }
+                if result != 0:
+                    raise HomeAssistantError(
+                        f"DLOCK-X1 rechazó DP71 (código {result}); no se ha reintentado"
+                    )
+            except TimeoutError:
+                self._device._dlock_dp71_last_result = {"status": "timeout"}
                 raise HomeAssistantError(
-                    "No hay un informe DP71 compatible para esta DLOCK-X1. "
-                    "Abre desde la app Tuya y comprueba sus propiedades DP19/DP71"
-                ) from err
-            await write_dp(self._device, 71, TuyaBLEDataPointType.DT_RAW, command)
+                    "No se confirmó la apertura DP71; comprueba físicamente la cerradura "
+                    "antes de repetir. No se ha reintentado"
+                ) from None
+            except HomeAssistantError:
+                raise
+            except asyncio.CancelledError:
+                self._device._dlock_dp71_last_result = {"status": "cancelled"}
+                raise
+            except Exception:
+                self._device._dlock_dp71_last_result = {"status": "transport_error"}
+                raise HomeAssistantError(
+                    "Falló la comunicación DP71; comprueba físicamente la cerradura "
+                    "antes de repetir. No se ha reintentado"
+                ) from None
+            finally:
+                unsubscribe()
+                if not confirmation.done():
+                    confirmation.cancel()

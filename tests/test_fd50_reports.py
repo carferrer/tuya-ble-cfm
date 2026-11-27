@@ -47,6 +47,17 @@ def test_live_sdk_header_scalars_unsigned_enum_and_ack():
     assert report.acknowledgement == bytes.fromhex("0012345678000200")
 
 
+def test_dlock_compact_ble_access_zero_is_published():
+    device = make_device()
+    observed = []
+    device.register_callback(lambda values: observed.extend(values))
+    # Captured shape, fictional sequence; high flag means no ACK requested.
+    header = bytes.fromhex("00000000038000")
+    reports.handle_report(device, 20, LIVE, header + dp(19, 2, b"\x00"))
+    assert [(p.id, p.value) for p in observed] == [(19, 0)]
+    assert not getattr(device, "_fd50_v4_rejected", 0)
+
+
 @pytest.mark.parametrize("time_data,expected", [
     (b"\x01" + pack(">I", 1795807200), 1795807200.0),
     (b"\x00" + b"1795807200123", 1795807200.123),
@@ -251,14 +262,14 @@ def test_direct_report_diagnostics_are_dlock_only(product):
     assert not hasattr(device, "_fd50_v4_received")
 
 
-@pytest.mark.parametrize("dp_id", [8, 12])
+@pytest.mark.parametrize("dp_id", [8, 12, 19])
 @pytest.mark.parametrize("value", [0, 52, 100, 127, 128, 200, 255])
 def test_dlock_observed_uint8_values_are_unsigned(dp_id, value):
     result = reports.parse_report(LIVE, HEADER + dp(dp_id, 2, bytes([value])), 1)
     assert result.datapoints[0][2] == value
 
 
-@pytest.mark.parametrize("dp_id", [8, 12])
+@pytest.mark.parametrize("dp_id", [8, 12, 19])
 @pytest.mark.parametrize("raw", [b"", b"\x00\x01", b"\x00\x00\x01"])
 def test_other_compact_lengths_remain_rejected(dp_id, raw):
     with pytest.raises(TuyaBLEDataFormatError):

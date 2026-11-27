@@ -1,7 +1,7 @@
 """DLOCK-only V4 writes and controls; no commands leak to other products."""
 
 import asyncio
-import base64
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -134,35 +134,148 @@ def test_volume_confirms_matching_report(value, option):
     asyncio.run(run())
 
 
-def test_unlock_missing_cloud_report_sends_nothing():
-    entity = SimpleNamespace(
-        _device=SimpleNamespace(product_id="99gv5nmz", device_id="dlock-2"),
-        _manager=SimpleNamespace(get_lock_unlock_properties=AsyncMock(return_value=[])),
+def local_unlock_entity(tmp_path, unit=1, seed="0005616263646566676801"):
+    address = f"AA:BB:CC:DD:EE:{unit:02X}"
+    device = SimpleNamespace(
+        product_id="99gv5nmz", device_id=f"dlock-{unit}", address=address,
+        connected=True, _client=object(), reconnect=AsyncMock(),
     )
+    callbacks = []
+    unsubscribe = MagicMock(side_effect=lambda: callbacks.clear())
+    device.register_callback = MagicMock(side_effect=lambda cb: (callbacks.append(cb), unsubscribe)[1])
+    path = tmp_path / "tuya_ble_private" / f"dlock_aabbccddee{unit:02x}.json"
+    path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({
+        "version": 1, "product_id": "99gv5nmz", "device_id": device.device_id,
+        "address": address, "seed": seed,
+    }))
+    async def executor(fn, *args):
+        return fn(*args)
+    hass = SimpleNamespace(
+        config=SimpleNamespace(path=lambda *parts: str(tmp_path.joinpath(*parts))),
+        async_add_executor_job=AsyncMock(side_effect=executor),
+    )
+    entity = SimpleNamespace(_device=device, _hass=hass)
+    return entity, path, callbacks, unsubscribe
+
+
+def reply_to(command, status=0):
+    return command[2:4] + command[:2] + command[4:18] + bytes((status,))
+
+
+def test_local_unlock_missing_file_sends_nothing_and_does_not_connect(tmp_path):
+    entity, path, _, _ = local_unlock_entity(tmp_path)
+    path.unlink()
+    entity._device.connected = False
     with patch(f"{CONTROLS}.write_dp", new_callable=AsyncMock) as send:
-        with pytest.raises(HomeAssistantError, match="informe DP71 compatible"):
+        with pytest.raises(HomeAssistantError, match="archivo privado"):
             asyncio.run(DLOCKUnlockTestButton.async_press(entity))
     send.assert_not_awaited()
-    entity._manager.get_lock_unlock_properties.assert_awaited_once_with("dlock-2")
+    entity._device.reconnect.assert_not_awaited()
 
 
-def test_unlock_uses_own_report_and_one_dp71_without_dp6():
-    report = b"\x00\x05\xff\xff12345678\x01" + bytes(6)
-    properties = [
-        {"code": "ble_unlock_check", "value": base64.b64encode(report).decode(), "time": 1},
-        {"code": "unlock_ble", "value": 1},
-    ]
-    device = SimpleNamespace(product_id="99gv5nmz", device_id="dlock-3")
-    entity = SimpleNamespace(
-        _device=device,
-        _manager=SimpleNamespace(get_lock_unlock_properties=AsyncMock(return_value=properties)),
-    )
-    with patch(f"{CONTROLS}.write_dp", new_callable=AsyncMock) as send:
+@pytest.mark.parametrize("unit", [1, 2, 3])
+def test_local_unlock_own_file_single_dp71_and_confirmed_result(tmp_path, unit):
+    entity, _, callbacks, unsubscribe = local_unlock_entity(tmp_path, unit)
+    async def send(device, dp, kind, command):
+        callbacks[0]([SimpleNamespace(id=71, type=DP.DT_RAW, value=reply_to(command))])
+    with (
+        patch(f"{CONTROLS}.write_dp", AsyncMock(side_effect=send)) as sender,
+        patch(f"{CONTROLS}.time.time", return_value=1800000000),
+    ):
         asyncio.run(DLOCKUnlockTestButton.async_press(entity))
-    send.assert_awaited_once()
-    assert send.call_args.args[:3] == (device, 71, DP.DT_RAW)
-    assert len(send.call_args.args[3]) == 19
-    assert send.call_args.args[3][:12] == b"\xff\xff\x00\x0512345678"
+    sender.assert_awaited_once()
+    args = sender.call_args.args
+    assert args[:3] == (entity._device, 71, DP.DT_RAW)
+    assert args[3] == b"\xff\xff\x00\x05abcdefgh\x01" + (1800000000).to_bytes(4, "big") + b"\x00\x01"
+    assert entity._device._dlock_dp71_last_result == {"status": "confirmed", "response_code": 0}
+    entity._hass.async_add_executor_job.assert_awaited_once()
+    unsubscribe.assert_called_once()
+    assert not entity._device._dlock_command_lock.locked()
+
+
+@pytest.mark.parametrize("result", [1, 2, 3, 4, 5, 6])
+def test_local_unlock_reports_rejection_without_retry(tmp_path, result):
+    entity, _, callbacks, unsubscribe = local_unlock_entity(tmp_path)
+    async def send(device, dp, kind, command):
+        callbacks[0]([SimpleNamespace(id=71, type=DP.DT_RAW, value=reply_to(command, result))])
+    with patch(f"{CONTROLS}.write_dp", AsyncMock(side_effect=send)) as sender:
+        with pytest.raises(HomeAssistantError, match=f"código {result}"):
+            asyncio.run(DLOCKUnlockTestButton.async_press(entity))
+    sender.assert_awaited_once()
+    unsubscribe.assert_called_once()
+    assert entity._device._dlock_dp71_last_result["status"] == "rejected"
+
+
+@pytest.mark.parametrize("reply_kind", ["none", "stale", "wrong_type", "other_session"])
+def test_transport_ack_does_not_confirm_unlock(tmp_path, reply_kind):
+    entity, _, callbacks, unsubscribe = local_unlock_entity(tmp_path)
+    async def send(device, dp, kind, command):
+        reply = reply_to(command)
+        if reply_kind == "none":
+            return
+        if reply_kind == "stale":
+            reply = reply[:13] + bytes(4) + reply[17:]
+        if reply_kind == "other_session":
+            device._client = object()
+        callbacks[0]([SimpleNamespace(id=71, type=DP.DT_ENUM if reply_kind == "wrong_type" else DP.DT_RAW, value=reply)])
+    with (
+        patch(f"{CONTROLS}.write_dp", AsyncMock(side_effect=send)) as sender,
+        patch(f"{CONTROLS}.UNLOCK_TIMEOUT", 0.001),
+    ):
+        with pytest.raises(HomeAssistantError, match="No se confirmó"):
+            asyncio.run(DLOCKUnlockTestButton.async_press(entity))
+    sender.assert_awaited_once()
+    unsubscribe.assert_called_once()
+    assert entity._device._dlock_dp71_last_result == {"status": "timeout"}
+
+
+def test_unlock_connection_precedes_timestamp_and_send(tmp_path):
+    entity, _, callbacks, _ = local_unlock_entity(tmp_path)
+    device = entity._device
+    device.connected = False
+    calls = []
+    async def connect():
+        calls.append("connect")
+        device.connected = True
+    async def sleep(delay):
+        calls.append("settle")
+        assert delay == 0.5
+    def now():
+        calls.append("timestamp")
+        return 1800000000
+    async def send(device, dp, kind, command):
+        calls.append("send")
+        callbacks[0]([SimpleNamespace(id=71, type=DP.DT_RAW, value=reply_to(command))])
+    device.reconnect.side_effect = connect
+    with (
+        patch(f"{CONTROLS}.write_dp", AsyncMock(side_effect=send)),
+        patch(f"{CONTROLS}.time.time", side_effect=now),
+        patch(f"{CONTROLS}.asyncio.sleep", side_effect=sleep),
+    ):
+        asyncio.run(DLOCKUnlockTestButton.async_press(entity))
+    assert calls == ["connect", "settle", "timestamp", "send"]
+
+
+def test_failed_unlock_connection_sends_nothing(tmp_path):
+    entity, _, _, _ = local_unlock_entity(tmp_path)
+    entity._device.connected = False
+    with patch(f"{CONTROLS}.write_dp", new_callable=AsyncMock) as sender:
+        with pytest.raises(HomeAssistantError, match="No se pudo conectar"):
+            asyncio.run(DLOCKUnlockTestButton.async_press(entity))
+    sender.assert_not_awaited()
+
+
+@pytest.mark.parametrize("failure", [BleakError("private bytes"), asyncio.CancelledError()])
+def test_unlock_failure_cleans_callback_and_does_not_retry(tmp_path, failure):
+    entity, _, _, unsubscribe = local_unlock_entity(tmp_path)
+    with patch(f"{CONTROLS}.write_dp", AsyncMock(side_effect=failure)) as sender:
+        with pytest.raises((HomeAssistantError, asyncio.CancelledError)) as error:
+            asyncio.run(DLOCKUnlockTestButton.async_press(entity))
+    assert "private bytes" not in str(error.value)
+    sender.assert_awaited_once()
+    unsubscribe.assert_called_once()
+    assert not entity._device._dlock_command_lock.locked()
 
 
 def test_disconnected_write_connects_before_send_and_refuses_failed_connection():

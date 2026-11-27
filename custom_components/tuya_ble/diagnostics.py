@@ -78,6 +78,7 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
             ),
         } if device.product_id == "8gza4o8a" else None,
         "fd50_connection": {
+            "dp71_local_last_result": getattr(device, "_dlock_dp71_last_result", None),
             "stage": getattr(device, "_fd50_stage", "not_started"),
             "last_error": getattr(device, "_fd50_last_error", None),
             "write_capacity": getattr(device, "_fd50_write_size", None),
