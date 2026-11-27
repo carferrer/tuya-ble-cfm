@@ -70,6 +70,10 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
                     continue
                 self._last_mode_evidence = timestamp
                 self._passage = not dp.value
+                if self._source == "startup_auto_lock" and self._passage:
+                    # New mode evidence contradicts the basis of the startup guess.
+                    self._attr_is_locked = None
+                    self._source = "unknown"
                 # A mode change is not an opening or a closing confirmation.
                 if self._attr_is_locked is False:
                     self._source = "passage_mode" if self._passage else "awaiting_motor"
@@ -101,13 +105,17 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
-        # Start unknown: a stored motor value alone cannot represent this model
-        # after an unobserved opening. Do not replay cached access events.
+        # Only a saved auto-lock=true permits the requested startup estimate.
+        # Do not restore old motor values or replay cached access events.
         state = getattr(self._device, "_cfm_lock_state", None)
         if state is not None:
             value = state.get(33)
             if type(value) is bool:
                 self._passage = not value
+                if value is True:
+                    self._attr_is_locked = True
+                    self._source = "startup_auto_lock"
+                    self._estimated = True
         self.async_on_remove(self._device.register_callback(self._handle_updates))
         listeners = getattr(self._device, "_dlock_open_listeners", None)
         if listeners is None:

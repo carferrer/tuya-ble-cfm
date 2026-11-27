@@ -131,3 +131,85 @@ def test_unlock_and_open_use_button_path_but_lock_never_sends_an_opening():
             assert press.await_count == 2
         assert entity.is_locked is None
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("saved,expected", [
+    (True, True), (False, None), (None, None), (1, None), ("true", None),
+])
+def test_startup_estimate_uses_only_saved_boolean_auto_lock(saved, expected):
+    async def run():
+        entity = entity_for()
+        entity._device._cfm_lock_state = SimpleNamespace(
+            get=lambda dp: saved if dp == 33 else False
+        )
+        with patch(f"{MODULE}.TuyaBLEEntity.async_added_to_hass", new_callable=AsyncMock):
+            await entity.async_added_to_hass()
+        assert entity.is_locked is expected
+        assert entity.extra_state_attributes["state_estimated"] is True
+        assert entity.extra_state_attributes["state_source"] == (
+            "startup_auto_lock" if saved is True else "unknown"
+        )
+        # Startup estimates are not new motor/opening evidence.
+        assert entity._last_evidence == 0
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("evidence", ["motor_closed", "motor_open", "access", "dp71"])
+def test_live_evidence_replaces_startup_estimate(evidence):
+    async def run():
+        entity = entity_for()
+        entity._device._cfm_lock_state = SimpleNamespace(get=lambda dp: True)
+        with patch(f"{MODULE}.TuyaBLEEntity.async_added_to_hass", new_callable=AsyncMock):
+            await entity.async_added_to_hass()
+        assert entity.is_locked is True
+        now = datetime.now(UTC).timestamp()
+        # Recovered openings cannot overwrite the initial estimate.
+        entity._handle_updates([report(12, 100, now - 3600)])
+        assert entity.is_locked is True
+        if evidence == "dp71":
+            notify_local_open(entity._device)
+        elif evidence == "access":
+            entity._handle_updates([report(12, 100, now)])
+        else:
+            entity._handle_updates([report(47, evidence == "motor_open", now)])
+        assert entity.is_locked is (evidence == "motor_closed")
+        assert entity.extra_state_attributes["state_source"] == (
+            "motor" if evidence.startswith("motor") else
+            "access_event" if evidence == "access" else "dp71"
+        )
+        assert entity.extra_state_attributes["state_estimated"] is (
+            not evidence.startswith("motor")
+        )
+    asyncio.run(run())
+
+
+def test_passage_report_invalidates_only_startup_estimate():
+    async def run():
+        entity = entity_for()
+        entity._device._cfm_lock_state = SimpleNamespace(get=lambda dp: True)
+        with patch(f"{MODULE}.TuyaBLEEntity.async_added_to_hass", new_callable=AsyncMock):
+            await entity.async_added_to_hass()
+        now = datetime.now(UTC).timestamp()
+        entity._handle_updates([report(33, False, now - 0.5)])
+        assert entity.is_locked is None
+        assert entity.extra_state_attributes["state_source"] == "unknown"
+        # Switching auto-lock on during runtime is still not a closing report.
+        entity._handle_updates([report(33, True, now)])
+        assert entity.is_locked is None
+        entity._handle_updates([report(47, False, now)])
+        assert entity.is_locked is True
+        # A confirmed motor state is not a startup guess.
+        entity._handle_updates([report(33, False, now)])
+        assert entity.is_locked is True
+        assert entity.extra_state_attributes["state_source"] == "motor"
+    asyncio.run(run())
+
+
+def test_no_saved_state_keeps_startup_unknown():
+    async def run():
+        entity = entity_for()
+        with patch(f"{MODULE}.TuyaBLEEntity.async_added_to_hass", new_callable=AsyncMock):
+            await entity.async_added_to_hass()
+        assert entity.is_locked is None
+        assert entity.extra_state_attributes["passage_mode"] is None
+    asyncio.run(run())
