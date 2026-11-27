@@ -6,6 +6,7 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .dlock_attempts import attempt_history
 from .dlock_unlock import CONF_DLOCK_SEED
 
 TO_REDACT = {
@@ -81,6 +82,7 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
         } if device.product_id == "8gza4o8a" else None,
         "fd50_connection": {
             "dp71_local_last_result": getattr(device, "_dlock_dp71_last_result", None),
+            "dp71_attempts": attempt_history(device),
             "stage": getattr(device, "_fd50_stage", "not_started"),
             "last_error": getattr(device, "_fd50_last_error", None),
             "write_capacity": getattr(device, "_fd50_write_size", None),

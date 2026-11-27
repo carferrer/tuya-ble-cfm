@@ -50,8 +50,8 @@ PRODUCT_OKKYFGFS = "okkyfgfs"
 def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
     """Load only the controls verified for each lock product."""
     if device.product_id == PRODUCT_99GV5NMZ:
-        # DLOCK-only V4 controls; DP47 is not reliable enough for a lock entity.
-        return [Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT, Platform.SELECT, Platform.SWITCH]
+        # DLOCK-only controls and explicitly estimated lock state.
+        return [Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT, Platform.SELECT, Platform.SWITCH, Platform.LOCK]
     if device.product_id == PRODUCT_B3AOULUH:
         return PLATFORMS
     if device.product_id == PRODUCT_OKKYFGFS:

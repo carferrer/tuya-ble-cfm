@@ -128,18 +128,34 @@ async def send_packet(device, code, data, response_to, wait_for_response, *, exp
         headers = device._fd50_write_headers = {}
     if code == TuyaBLECode.FUN_SENDER_DPS_V4 and future is not None:
         headers[seq] = bytes(data[:5])
+    attempt = None
+    if (device.product_id == "99gv5nmz"
+            and code == TuyaBLECode.FUN_SENDER_DPS_V4
+            and len(data) > 5 and data[5] == 71):
+        attempt = getattr(device, "_dlock_active_unlock_attempt", None)
     try:
         packets = device._build_packets(seq, code, data, response_to)
+        if attempt is not None:
+            attempt.phase("waiting_write_lock")
+            attempt.data["packets_total"] = len(packets)
         async with device._operation_lock:
             client = device._client
             if expected_client is not None and client is not expected_client:
                 raise BleakError("DLOCK-X1: report belongs to an earlier BLE session")
             if client is None or not client.is_connected:
                 raise BleakError("DLOCK-X1: disconnected before FD50 write")
+            if attempt is not None:
+                attempt.phase("writing_packets")
             for packet in packets:
                 await client.write_gatt_char(WRITE_UUID, packet, response=False)
+                if attempt is not None:
+                    attempt.data["packets_written"] += 1
         if future is not None:
+            if attempt is not None:
+                attempt.phase("waiting_transport_ack")
             await asyncio.wait_for(future, RESPONSE_TIMEOUT)
+            if attempt is not None:
+                attempt.data["transport_ack_received"] = True
         return True
     finally:
         headers.pop(seq, None)

@@ -92,6 +92,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
+    if data.device.product_id == "99gv5nmz":
+        from .dlock_lock import DLOCKLock
+
+        async_add_entities([DLOCKLock(hass, data, entry)])
+        return
     if data.device.product_id in (
         PRODUCT_B3AOULUH,
         PRODUCT_OKKYFGFS,
