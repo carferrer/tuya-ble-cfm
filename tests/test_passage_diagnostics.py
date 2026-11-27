@@ -84,6 +84,7 @@ def test_last_connection_sensor_uses_actual_connection_callback():
 def test_la_t01_dp71_history_compares_replies_without_exposing_verification():
     namespace = {
         "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "PRODUCT_99GV5NMZ": "99gv5nmz",
         "PRODUCT_B3AOULUH": "b3aouluh",
         "time": SimpleNamespace(time=lambda: 1793733266.0),
     }
