@@ -513,6 +513,12 @@ def test_dlock_x1_platforms_and_mappings():
     assert button.get_mapping_by_device(device) == []
     assert select.get_mapping_by_device(device) == []
     assert {item.dp_id for item in sensor.get_mapping_by_device(device)} == {8, 9, 21}
+    battery = {item.dp_id: item.description for item in sensor.get_mapping_by_device(device)}
+    assert battery[9].entity_registry_enabled_default is False
+    assert battery[8].entity_registry_enabled_default is True
+    legacy = SimpleNamespace(category="jtmspro", product_id="b3aouluh")
+    legacy_state = next(item for item in sensor.get_mapping_by_device(legacy) if item.dp_id == 9)
+    assert legacy_state.description.entity_registry_enabled_default is True
     assert {item.dp_id for item in binary_sensor.get_mapping_by_device(device)} == {33, 47}
 
 
