@@ -107,16 +107,6 @@ mapping = {
         PRODUCT_99GV5NMZ: [
             alarm_mapping(),
             TuyaBLEBatteryMapping(dp_id=8),
-            TuyaBLESensorMapping(
-                dp_id=9,
-                description=SensorEntityDescription(
-                    key="battery_state",
-                    entity_registry_enabled_default=False,
-                    device_class=SensorDeviceClass.ENUM,
-                    entity_category=EntityCategory.DIAGNOSTIC,
-                    options=["high", "medium", "low"],
-                ),
-            ),
         ],
         PRODUCT_8GZA4O8A: [
             alarm_mapping(),
