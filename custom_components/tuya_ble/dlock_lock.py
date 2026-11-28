@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from datetime import UTC, datetime
 
@@ -12,6 +13,9 @@ from .access import access_record_from_datapoint, access_record_key
 from .devices import TuyaBLEEntity
 from .dlock_controls import DLOCKUnlockTestButton
 from .tuya_ble import TuyaBLEDataPointType as DP
+
+
+AUTO_LOCK_ESTIMATE_SECONDS = 7.0
 
 
 class DLOCKLock(TuyaBLEEntity, LockEntity):
@@ -32,6 +36,8 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
         self._last_evidence = 0.0
         self._last_mode_evidence = 0.0
         self._seen = deque(maxlen=200)
+        self._auto_lock_timer = None
+        self._auto_lock_timer_generation = 0
 
     @property
     def available(self):
@@ -52,11 +58,41 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
         self._last_evidence = max(self._last_evidence, timestamp)
         self.async_write_ha_state()
 
-    def _local_open(self):
-        self._set_state(
-            False, "passage_mode" if self._passage else "dp71", True,
-            datetime.now(UTC).timestamp(),
+    def _cancel_auto_lock_timer(self):
+        """Invalidate even an already queued callback; never send a command."""
+        self._auto_lock_timer_generation += 1
+        if self._auto_lock_timer is not None:
+            self._auto_lock_timer.cancel()
+            self._auto_lock_timer = None
+
+    def _start_auto_lock_timer(self):
+        """Estimate closure only after an opening with known auto-lock enabled."""
+        self._cancel_auto_lock_timer()
+        if self._passage is not False or self._attr_is_locked is not False:
+            return
+        generation = self._auto_lock_timer_generation
+
+        def estimate_closed():
+            if generation != self._auto_lock_timer_generation:
+                return
+            self._auto_lock_timer = None
+            if self._passage is False and self._attr_is_locked is False:
+                # An estimate is not a newer device report: preserve the evidence
+                # timestamp so a real, slightly delayed opening still wins.
+                self._set_state(True, "auto_lock_timer", True, self._last_evidence)
+
+        self._auto_lock_timer = asyncio.get_running_loop().call_later(
+            AUTO_LOCK_ESTIMATE_SECONDS, estimate_closed
         )
+
+    def _opening_observed(self, source, timestamp):
+        self._set_state(
+            False, "passage_mode" if self._passage else source, True, timestamp
+        )
+        self._start_auto_lock_timer()
+
+    def _local_open(self):
+        self._opening_observed("dp71", datetime.now(UTC).timestamp())
 
     def _handle_updates(self, updates):
         now = datetime.now(UTC).timestamp()
@@ -70,8 +106,10 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
                     continue
                 self._last_mode_evidence = timestamp
                 self._passage = not dp.value
-                if self._source == "startup_auto_lock" and self._passage:
-                    # New mode evidence contradicts the basis of the startup guess.
+                if self._passage:
+                    self._cancel_auto_lock_timer()
+                if self._source in ("startup_auto_lock", "auto_lock_timer") and self._passage:
+                    # New mode evidence contradicts the basis of the estimate.
                     self._attr_is_locked = None
                     self._source = "unknown"
                 # A mode change is not an opening or a closing confirmation.
@@ -84,10 +122,13 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
                     continue
                 if not dp.value and timestamp < self._last_mode_evidence:
                     continue
+                self._cancel_auto_lock_timer()
                 if not dp.value and self._passage and self._attr_is_locked is False:
                     self._set_state(False, "passage_mode", True, timestamp)
                 else:
                     self._set_state(not dp.value, "motor", False, timestamp)
+                    if dp.value:
+                        self._start_auto_lock_timer()
             else:
                 record = access_record_from_datapoint(dp, now)
                 if record is None or record["recovered"]:
@@ -98,10 +139,7 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
                 self._seen.append(key)
                 if timestamp <= self._last_evidence:
                     continue
-                self._set_state(
-                    False, "passage_mode" if self._passage else "access_event",
-                    True, timestamp,
-                )
+                self._opening_observed("access_event", timestamp)
 
     async def async_added_to_hass(self):
         await super().async_added_to_hass()
@@ -116,6 +154,7 @@ class DLOCKLock(TuyaBLEEntity, LockEntity):
                     self._attr_is_locked = True
                     self._source = "startup_auto_lock"
                     self._estimated = True
+        self.async_on_remove(self._cancel_auto_lock_timer)
         self.async_on_remove(self._device.register_callback(self._handle_updates))
         listeners = getattr(self._device, "_dlock_open_listeners", None)
         if listeners is None:
