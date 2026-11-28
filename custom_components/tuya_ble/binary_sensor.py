@@ -19,6 +19,7 @@ from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
     PRODUCT_8GZA4O8A,
+    PRODUCT_99GV5NMZ,
     TuyaBLEData,
     TuyaBLEEntity,
     TuyaBLEProductInfo,
@@ -54,6 +55,7 @@ mapping = {
         PRODUCT_7A4XVBTT: [*LOCK_MOTOR, AUTOMATIC_LOCK],
     },
     "jtmspro": {
+        PRODUCT_99GV5NMZ: [*LOCK_MOTOR, AUTOMATIC_LOCK],
         "b3aouluh": LOCK_MOTOR,
         PRODUCT_8GZA4O8A: [*LOCK_MOTOR, AUTOMATIC_LOCK],
     },

@@ -30,6 +30,7 @@ EXPECTED = [
 
 
 class DPType(Enum):
+    DT_BOOL = 1
     DT_ENUM = 4
     DT_VALUE = 2
 
@@ -90,6 +91,10 @@ def load_code(filename, namespace):
 def code():
     ns = {
         "DOMAIN": "tuya_ble",
+        "PRODUCT_B3AOULUH": "b3aouluh",
+        "PRODUCT_7A4XVBTT": "7a4xvbtt",
+        "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "PRODUCT_99GV5NMZ": "99gv5nmz",
         "TuyaBLEDataPointType": DPType,
         "EventEntity": FakeEvent,
         "Store": FakeStore,
@@ -274,6 +279,7 @@ def test_setup_only_adds_alarm_for_validated_product(code):
             "PRODUCT_OKKYFGFS": "okkyfgfs",
             "PRODUCT_7A4XVBTT": "7a4xvbtt",
             "PRODUCT_8GZA4O8A": "8gza4o8a",
+            "PRODUCT_99GV5NMZ": "99gv5nmz",
         }
     )
     # Load the real platform setup with an inert access entity constructor.
@@ -294,6 +300,7 @@ def test_setup_only_adds_alarm_for_validated_product(code):
         ("okkyfgfs", 2),
         ("7a4xvbtt", 2),
         ("8gza4o8a", 2),
+        ("99gv5nmz", 2),
         ("unsupported", 0),
     ]:
         added = []

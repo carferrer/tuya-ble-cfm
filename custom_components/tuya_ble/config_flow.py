@@ -27,6 +27,7 @@ from homeassistant.const import (
 )
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowHandler, FlowResult
+from homeassistant.helpers.selector import TextSelector, TextSelectorConfig, TextSelectorType
 
 from .tuya_ble import SERVICE_UUID, TuyaBLEDeviceCredentials
 
@@ -54,6 +55,7 @@ from .const import (
 )
 from .devices import TuyaBLEData, get_device_readable_name
 from .cloud import HASSTuyaBLEDeviceManager
+from .dlock_unlock import CONF_DLOCK_SEED, PRODUCT_ID as DLOCK_PRODUCT_ID, seed_record
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -188,11 +190,57 @@ class TuyaBLEOptionsFlow(OptionsFlowWithConfigEntry):
         """Initialize options flow."""
         super().__init__(config_entry)
 
+    def _dlock_identity(self) -> dict | None:
+        """Use this entry's saved identity, including when it is not loaded."""
+        options = self.config_entry.options
+        if options.get("product_id") != DLOCK_PRODUCT_ID:
+            return None
+        device_id = options.get("device_id")
+        address = self.config_entry.data.get(CONF_ADDRESS)
+        if not isinstance(device_id, str) or not device_id or not isinstance(address, str):
+            return None
+        return {"product_id": DLOCK_PRODUCT_ID, "device_id": device_id, "address": address}
+
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Manage the options."""
+        if self._dlock_identity() is not None:
+            return self.async_show_menu(
+                step_id="init", menu_options=["local_unlock", "login"]
+            )
         return await self.async_step_login(user_input)
+
+    async def async_step_local_unlock(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Save DLOCK verification locally; never log in, connect or open here."""
+        identity = self._dlock_identity()
+        if identity is None:
+            return self.async_abort(reason="not_dlock")
+        errors = {}
+        if user_input is not None:
+            options = dict(self.config_entry.options)
+            value = user_input.get(CONF_DLOCK_SEED, "")
+            if isinstance(value, str) and not value.strip():
+                # An empty password field preserves the stored value and identity.
+                return self.async_create_entry(title=self.config_entry.title, data=options)
+            try:
+                options[CONF_DLOCK_SEED] = seed_record(value, **identity)
+            except ValueError:
+                errors[CONF_DLOCK_SEED] = "invalid_dlock_seed"
+            else:
+                return self.async_create_entry(title=self.config_entry.title, data=options)
+        # Never prefill, suggest or echo a secret, including after validation fails.
+        return self.async_show_form(
+            step_id="local_unlock",
+            data_schema=vol.Schema({
+                vol.Optional(CONF_DLOCK_SEED): TextSelector(
+                    TextSelectorConfig(type=TextSelectorType.PASSWORD)
+                ),
+            }),
+            errors=errors,
+        )
 
     async def async_step_login(
         self, user_input: dict[str, Any] | None = None
@@ -226,6 +274,10 @@ class TuyaBLEOptionsFlow(OptionsFlowWithConfigEntry):
                 credentials = await manager.get_device_credentials(address, True, True)
                 if credentials:
                     options = dict(manager.data)
+                    if self._dlock_identity() is not None and CONF_DLOCK_SEED in self.config_entry.options:
+                        # A loaded manager may predate a seed saved in options.
+                        # Preserve the current bound record during account edits.
+                        options[CONF_DLOCK_SEED] = self.config_entry.options[CONF_DLOCK_SEED]
                     options[CONF_CONNECTION_MODE] = user_input.get(
                         CONF_CONNECTION_MODE,
                         DEFAULT_CONNECTION_MODE,

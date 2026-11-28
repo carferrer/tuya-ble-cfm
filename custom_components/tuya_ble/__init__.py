@@ -24,6 +24,7 @@ from .const import CONF_FUNCTIONS, CONF_STATUS_RANGE, DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
     PRODUCT_8GZA4O8A,
+    PRODUCT_99GV5NMZ,
     TuyaBLECoordinator,
     TuyaBLEData,
     get_device_product_info,
@@ -48,6 +49,9 @@ PRODUCT_OKKYFGFS = "okkyfgfs"
 
 def _platforms_for_device(device: TuyaBLEDevice) -> list[Platform]:
     """Load only the controls verified for each lock product."""
+    if device.product_id == PRODUCT_99GV5NMZ:
+        # DLOCK-only controls and explicitly estimated lock state.
+        return [Platform.BUTTON, Platform.SENSOR, Platform.BINARY_SENSOR, Platform.EVENT, Platform.SELECT, Platform.SWITCH, Platform.LOCK]
     if device.product_id == PRODUCT_B3AOULUH:
         return PLATFORMS
     if device.product_id == PRODUCT_OKKYFGFS:

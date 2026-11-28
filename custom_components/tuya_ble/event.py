@@ -30,12 +30,22 @@ from .const import DOMAIN
 from .devices import (
     PRODUCT_7A4XVBTT,
     PRODUCT_8GZA4O8A,
+    PRODUCT_99GV5NMZ,
     PRODUCT_B3AOULUH,
     PRODUCT_OKKYFGFS,
     TuyaBLEData,
     get_device_info,
 )
 from .tuya_ble import TuyaBLEDataPoint, TuyaBLEDataPointType, TuyaBLEDevice
+
+
+# Actual DP33 value that enables passage mode for each supported family.
+PASSAGE_MODE_ENABLED_VALUE = {
+    PRODUCT_B3AOULUH: True,
+    PRODUCT_7A4XVBTT: False,
+    PRODUCT_8GZA4O8A: False,
+    PRODUCT_99GV5NMZ: False,
+}
 
 
 class TuyaBLEAccessEvent(EventEntity):
@@ -64,7 +74,7 @@ class TuyaBLEAccessEvent(EventEntity):
         self._queued_records: list[dict[str, Any]] = []
         self._passage_mode: bool | None = None
         self._pending_passage_open = False
-        if device.product_id != PRODUCT_B3AOULUH:
+        if device.product_id not in PASSAGE_MODE_ENABLED_VALUE:
             self._attr_event_types = [
                 event_type
                 for event_type in ACCESS_EVENT_TYPES
@@ -145,14 +155,16 @@ class TuyaBLEAccessEvent(EventEntity):
         """Handle live or replayed access datapoints from the BLE transport."""
         for datapoint in updates:
             if (
-                self._device.product_id == PRODUCT_B3AOULUH
+                self._device.product_id in PASSAGE_MODE_ENABLED_VALUE
                 and datapoint.id == DP_PASSAGE_MODE
                 and datapoint.type == TuyaBLEDataPointType.DT_BOOL
                 and type(datapoint.value) is bool
             ):
                 was_enabled = self._passage_mode
-                self._passage_mode = datapoint.value
-                if was_enabled is False and datapoint.value:
+                self._passage_mode = (
+                    datapoint.value is PASSAGE_MODE_ENABLED_VALUE[self._device.product_id]
+                )
+                if was_enabled is False and self._passage_mode:
                     if self._ready:
                         self._emit_passage_mode_enabled()
                     else:
@@ -170,13 +182,24 @@ class TuyaBLEAccessEvent(EventEntity):
         """Load deduplication state and subscribe to Tuya BLE records."""
         await super().async_added_to_hass()
         self.async_on_remove(self._device.register_callback(self._handle_updates))
-        passage_dp = self._device.datapoints[DP_PASSAGE_MODE]
-        if (
-            passage_dp is not None
-            and passage_dp.type == TuyaBLEDataPointType.DT_BOOL
-            and type(passage_dp.value) is bool
-        ):
-            self._passage_mode = passage_dp.value
+        if self._device.product_id in PASSAGE_MODE_ENABLED_VALUE:
+            lock_state = getattr(self._device, "_cfm_lock_state", None)
+            if lock_state is not None:
+                # Same confirmed baseline as the passage switch, without
+                # treating restoration itself as a transition or a write.
+                passage_value = lock_state.get(DP_PASSAGE_MODE)
+            else:
+                passage_dp = self._device.datapoints[DP_PASSAGE_MODE]
+                passage_value = (
+                    passage_dp.value
+                    if passage_dp is not None
+                    and passage_dp.type == TuyaBLEDataPointType.DT_BOOL
+                    else None
+                )
+            if type(passage_value) is bool:
+                self._passage_mode = (
+                    passage_value is PASSAGE_MODE_ENABLED_VALUE[self._device.product_id]
+                )
 
         stored = await self._store.async_load()
         history = list(
@@ -242,6 +265,7 @@ async def async_setup_entry(
         PRODUCT_OKKYFGFS,
         PRODUCT_7A4XVBTT,
         PRODUCT_8GZA4O8A,
+        PRODUCT_99GV5NMZ,
     ):
         return
 

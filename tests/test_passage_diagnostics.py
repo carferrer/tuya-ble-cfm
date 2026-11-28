@@ -26,6 +26,7 @@ def test_passage_event_only_on_observed_closed_to_open_transition():
     namespace = {
         "PRODUCT_B3AOULUH": "b3aouluh",
         "DP_PASSAGE_MODE": 33,
+        "PASSAGE_MODE_ENABLED_VALUE": {"b3aouluh": True, "7a4xvbtt": False, "8gza4o8a": False, "99gv5nmz": False},
         "EVENT_PASSAGE_MODE_ENABLED": "passage_mode_enabled",
         "TuyaBLEDataPointType": dp_type,
         "datetime": datetime,
@@ -84,6 +85,7 @@ def test_last_connection_sensor_uses_actual_connection_callback():
 def test_la_t01_dp71_history_compares_replies_without_exposing_verification():
     namespace = {
         "PRODUCT_8GZA4O8A": "8gza4o8a",
+        "PRODUCT_99GV5NMZ": "99gv5nmz",
         "PRODUCT_B3AOULUH": "b3aouluh",
         "time": SimpleNamespace(time=lambda: 1793733266.0),
     }

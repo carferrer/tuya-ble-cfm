@@ -192,6 +192,11 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
+    if data.device.product_id == "99gv5nmz":
+        from .dlock_passage import DLOCKPassageModeSwitch
+
+        async_add_entities([DLOCKPassageModeSwitch(hass, data)])
+        return
     if data.device.product_id in PASSAGE_PRODUCTS:
         registry = er.async_get(hass)
         entity_id = registry.async_get_entity_id(

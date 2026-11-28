@@ -6,8 +6,11 @@ from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .dlock_attempts import attempt_history
+from .dlock_unlock import CONF_DLOCK_SEED
 
 TO_REDACT = {
+    CONF_DLOCK_SEED,
     "username",
     "password",
     "local_key",
@@ -41,7 +44,7 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
                 "type": datapoint.type.name,
                 "value": (
                     "<redacted>"
-                    if device.product_id == "8gza4o8a" and dp_id in (70, 71)
+                    if device.product_id in ("8gza4o8a", "99gv5nmz") and dp_id in (70, 71)
                     else _serialize_value(datapoint.value)
                 ),
                 "timestamp": datapoint.timestamp,
@@ -77,6 +80,20 @@ def _runtime_diagnostics(hass: HomeAssistant, entry) -> dict[str, Any] | None:
                 getattr(device, "_cfm_dp71_response_history", [])
             ),
         } if device.product_id == "8gza4o8a" else None,
+        "fd50_connection": {
+            "dp71_local_last_result": getattr(device, "_dlock_dp71_last_result", None),
+            "dp71_attempts": attempt_history(device),
+            "stage": getattr(device, "_fd50_stage", "not_started"),
+            "last_error": getattr(device, "_fd50_last_error", None),
+            "write_capacity": getattr(device, "_fd50_write_size", None),
+            "v4_received": getattr(device, "_fd50_v4_received", 0),
+            "v4_parsed": getattr(device, "_fd50_v4_parsed", 0),
+            "v4_rejected": getattr(device, "_fd50_v4_rejected", 0),
+            "v4_acks_sent": getattr(device, "_fd50_v4_acks_sent", 0),
+            "v4_ack_errors": getattr(device, "_fd50_v4_ack_errors", 0),
+            "v4_last_report": getattr(device, "_fd50_v4_last_report", None),
+            "v4_rejections": list(getattr(device, "_fd50_v4_rejections", [])),
+        } if device.product_id == "99gv5nmz" else None,
         "record_recovery": {
             "dp69_request_count": int(
                 getattr(device, "_cfm_dp69_request_count", 0)

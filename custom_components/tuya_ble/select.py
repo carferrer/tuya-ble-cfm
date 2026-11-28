@@ -249,6 +249,10 @@ async def async_setup_entry(
 ) -> None:
     data: TuyaBLEData = hass.data[DOMAIN][entry.entry_id]
     entities = []
+    if data.device.product_id == "99gv5nmz":
+        from .dlock_controls import DLOCKVolumeSelect
+
+        entities.append(DLOCKVolumeSelect(hass, data, entry.entry_id))
     for item in get_mapping_by_device(data.device):
         if not (item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)):
             continue

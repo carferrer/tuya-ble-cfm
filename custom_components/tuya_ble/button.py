@@ -289,6 +289,10 @@ async def async_setup_entry(
         if item.force_add or data.device.datapoints.has_id(item.dp_id, item.dp_type)
     ]
     entities.append(TuyaBLERefreshButton(hass, data))
+    if data.device.product_id == "99gv5nmz":
+        from .dlock_controls import DLOCKUnlockTestButton
+
+        entities.append(DLOCKUnlockTestButton(hass, data, entry))
     if data.device.product_id == PRODUCT_8GZA4O8A:
         registry = er.async_get(hass)
         obsolete_dp6 = registry.async_get_entity_id(
